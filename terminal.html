@@ -34,6 +34,14 @@
         -webkit-user-select: none;
         cursor: default;
       }
+      #project-icon {
+        width: 18px;
+        height: 18px;
+        border-radius: 4px;
+      }
+      #project-icon[hidden] {
+        display: none;
+      }
       #pool {
         margin-left: auto;
         background: #313244;
@@ -64,6 +72,7 @@
   </head>
   <body>
     <header data-tauri-drag-region>
+      <img id="project-icon" hidden data-tauri-drag-region />
       <span id="project-name" data-tauri-drag-region></span>
       <span id="pool"></span>
     </header>

@@ -1626,6 +1626,12 @@ fn remove_work_dir(project: String, dir: String) -> Result<(), String> {
   remove_work_dir_in(&Paths::real(), &project, &dir)
 }
 
+/// Anzeigename eines Pools (pool.json) — die ID ist der Ordnername.
+#[tauri::command]
+fn pool_label(pool: String) -> Result<String, String> {
+  Ok(read_pool(&Paths::real(), &pool)?.name)
+}
+
 #[tauri::command]
 fn todo_state(project: String) -> Result<bool, String> {
   todo_state_in(&Paths::real(), &project)
@@ -1990,6 +1996,7 @@ fn main_builder() -> tauri::Builder<tauri::Wry> {
       unassign_pool,
       set_terminal_config,
       project_icon,
+      pool_label,
       todo_state,
       set_todo,
       usage_stats,
@@ -2026,8 +2033,10 @@ fn terminal_builder(project: String) -> tauri::Builder<tauri::Wry> {
       terminal::term_log,
       terminal::term_write,
       terminal::term_resize,
-      // Pool-Chip im Terminal-Header braucht die Projektliste auch hier.
-      list_projects
+      // Header im Terminal-Prozess: Projektliste, Icon und Pool-Name.
+      list_projects,
+      project_icon,
+      pool_label
     ])
 }
 

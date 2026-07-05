@@ -396,9 +396,25 @@ interface Project {
 }
 const projects = await invoke<Project[]>("list_projects");
 const cfg = projects.find((p) => p.name === project);
-if (cfg?.pool) document.getElementById("pool")!.textContent = cfg.pool;
+if (cfg?.pool) {
+  // Anzeigename statt Pool-ID (Ordnername).
+  document.getElementById("pool")!.textContent = await invoke<string>(
+    "pool_label",
+    { pool: cfg.pool },
+  );
+}
 document.getElementById("project-name")!.textContent =
   cfg?.terminal.title ?? project;
+
+// Projekt-Icon vor den Titel — dieselbe data-URL wie in der Projektliste.
+if (cfg?.terminal.icon) {
+  const data = await invoke<string | null>("project_icon", { project });
+  if (data) {
+    const img = document.getElementById("project-icon") as HTMLImageElement;
+    img.src = data;
+    img.hidden = false;
+  }
+}
 
 const picked = THEMES[cfg?.terminal.theme ?? "mocha"];
 const theme = picked.xterm;
