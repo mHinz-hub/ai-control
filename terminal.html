@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Terminal</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: #1e1e2e;
+        overflow: hidden;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        height: 44px;
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        /* links Platz für die macOS-Ampel (Overlay-Titelbar) */
+        padding: 0 16px 0 84px;
+        background: #181825;
+        border-bottom: 1px solid #313244;
+        color: #cdd6f4;
+        font:
+          500 13px/1 -apple-system,
+          system-ui,
+          sans-serif;
+        user-select: none;
+        -webkit-user-select: none;
+        cursor: default;
+      }
+      #pool {
+        margin-left: auto;
+        background: #313244;
+        color: #a6adc8;
+        border-radius: 999px;
+        padding: 4px 12px;
+        font-size: 11px;
+      }
+      #pool:empty {
+        display: none;
+      }
+      #term {
+        flex: 1;
+        min-height: 0;
+        padding: 12px 4px 12px 14px;
+      }
+      #term .xterm-viewport::-webkit-scrollbar {
+        width: 8px;
+      }
+      #term .xterm-viewport::-webkit-scrollbar-thumb {
+        background: #313244;
+        border-radius: 4px;
+      }
+      #term .xterm-viewport::-webkit-scrollbar-track {
+        background: transparent;
+      }
+    </style>
+  </head>
+  <body>
+    <header data-tauri-drag-region>
+      <span id="project-name" data-tauri-drag-region></span>
+      <span id="pool"></span>
+    </header>
+    <div id="term"></div>
+    <script type="module" src="/src/terminal.ts"></script>
+  </body>
+</html>

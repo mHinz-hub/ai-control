@@ -1,0 +1,673 @@
+/* Catppuccin Mocha — dieselbe Palette wie das eingebaute Terminal.
+   Die App verwaltet Terminals; sie spricht deren visuelle Sprache. */
+:root {
+  --base: #1e1e2e;
+  --mantle: #181825;
+  --crust: #11111b;
+  --surface0: #313244;
+  --surface1: #45475a;
+  --surface2: #585b70;
+  --text: #cdd6f4;
+  --subtext: #a6adc8;
+  --overlay: #6c7086;
+  --green: #a6e3a1;
+  --red: #f38ba8;
+  --blue: #89b4fa;
+  --peach: #fab387;
+  --lavender: #b4befe;
+  --mauve: #cba6f7;
+  --mono: "JetBrains Mono", Menlo, monospace;
+
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--base);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+/* ---------- Header ---------- */
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.85rem 1.5rem;
+  background: var(--mantle);
+  border-bottom: 1px solid var(--surface0);
+}
+
+h1 {
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--lavender);
+  margin: 0;
+}
+
+nav,
+.lang {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--crust);
+  border-radius: 8px;
+}
+
+nav button,
+.lang button {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--subtext);
+  padding: 0.3rem 0.9rem;
+}
+
+.lang button {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  padding: 0.3rem 0.55rem;
+}
+
+nav button:hover,
+.lang button:hover {
+  background: var(--surface0);
+  color: var(--text);
+}
+
+nav button.active,
+.lang button.active {
+  background: var(--surface0);
+  color: var(--text);
+}
+
+.header-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+header .autostart {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--subtext);
+  cursor: pointer;
+}
+
+input[type="checkbox"] {
+  padding: 0;
+  accent-color: var(--mauve);
+}
+
+main {
+  padding: 1.5rem;
+}
+
+/* ---------- Controls ---------- */
+
+button,
+select,
+input {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  border-radius: 7px;
+  padding: 0.4rem 0.8rem;
+}
+
+button {
+  cursor: pointer;
+  background: transparent;
+  color: var(--subtext);
+}
+
+button:hover:not(:disabled) {
+  background: var(--surface0);
+  color: var(--text);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--lavender);
+  outline-offset: 1px;
+}
+
+button.primary {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: var(--crust);
+  font-weight: 500;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--lavender);
+  border-color: var(--lavender);
+  color: var(--crust);
+}
+
+button.start {
+  background: var(--green);
+  border-color: var(--green);
+  color: var(--crust);
+  font-weight: 500;
+  width: 6.5rem;
+}
+
+button.start:hover:not(:disabled) {
+  background: #b8ecb3;
+  color: var(--crust);
+}
+
+button.stop {
+  background: var(--red);
+  border-color: var(--red);
+  color: var(--crust);
+  font-weight: 500;
+  width: 6.5rem;
+}
+
+button.stop:hover:not(:disabled) {
+  background: #f6a3bb;
+  color: var(--crust);
+}
+
+button.danger {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 40%, transparent);
+}
+
+button.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--red);
+}
+
+.row-actions {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0.4rem;
+}
+
+.row-actions .w-action {
+  width: 7.5rem;
+}
+
+/* Tooltip-Träger um den Löschen-Button: ein disabled Button empfängt keine
+   Hover-Events, darum sitzt das Hover-Pop am Span und der Button ist im
+   gesperrten Zustand für die Maus durchlässig. WKWebView zeigt keine nativen
+   title-Tooltips, daher das CSS-Pop (hover-pop/pop). */
+.tip-wrap {
+  display: inline-flex;
+}
+.tip-wrap button:disabled {
+  pointer-events: none;
+}
+
+/* Pop rechtsbündig — der Löschen-Button steht am rechten Zeilenrand.
+   Schmaler als das Standard-Pop, damit der Hinweis auf mind. zwei Zeilen
+   umbricht statt in einer sehr breiten Zeile zu stehen. */
+.hover-pop .pop.pop-right {
+  left: auto;
+  right: 0;
+  min-width: 0;
+  width: 13rem;
+  max-width: 13rem;
+}
+.pop-text {
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+button.gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.3rem;
+  padding: 0;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1.5rem;
+}
+
+/* ---------- Verbrauch ---------- */
+
+.range {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--crust);
+  border-radius: 8px;
+}
+
+.range button {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--subtext);
+  padding: 0.3rem 0.9rem;
+}
+
+.range button:hover:not(:disabled),
+.range button.active {
+  background: var(--surface0);
+  color: var(--text);
+}
+
+.usage-hint {
+  margin-left: auto;
+  color: var(--overlay);
+  font-size: 0.75rem;
+  text-align: right;
+  max-width: 32rem;
+}
+
+.pool-row {
+  cursor: pointer;
+}
+
+.pool-row .caret {
+  display: inline-block;
+  width: 1.1rem;
+  color: var(--overlay);
+}
+
+.project-row td {
+  border-bottom-color: color-mix(in srgb, var(--surface0) 25%, transparent);
+}
+
+.project-row .project-name {
+  padding-left: 2rem;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--subtext);
+}
+
+td.num,
+th.num {
+  text-align: right;
+}
+
+td.num {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--subtext);
+}
+
+td.num.cost {
+  color: var(--text);
+}
+
+tfoot td {
+  border-bottom: none;
+  border-top: 1px solid var(--surface0);
+  font-weight: 600;
+}
+
+tfoot .total-label {
+  text-align: right;
+  color: var(--subtext);
+}
+
+/* ---------- Tabellen ---------- */
+
+table.grid {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+col.col-dot {
+  width: 2.25rem;
+}
+col.col-pool {
+  width: 12rem;
+}
+col.col-actions {
+  width: 15rem;
+}
+col.col-actions-wide {
+  width: 21rem;
+}
+col.col-type {
+  width: 7rem;
+}
+col.col-projects {
+  width: 10rem;
+}
+col.col-num {
+  width: 6.5rem;
+}
+col.col-cost {
+  width: 7.5rem;
+}
+
+th {
+  text-align: left;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--overlay);
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--surface0);
+}
+
+td {
+  padding: 0.8rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--surface0) 45%, transparent);
+  vertical-align: middle;
+}
+
+tbody tr:hover {
+  background: color-mix(in srgb, var(--mantle) 60%, transparent);
+}
+
+.name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.proj-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  flex: none;
+}
+
+.cell-name strong {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.cell-name small {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--overlay);
+  margin-top: 0.2rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+td select {
+  width: 100%;
+}
+
+/* Status-Punkt: leuchtet nur, wenn eine Session läuft. */
+.dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.dot.on {
+  background: var(--green);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--green) 70%, transparent);
+}
+
+/* ---------- Pools ---------- */
+
+.badge {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--surface1);
+  color: var(--subtext);
+}
+
+.badge.oauth {
+  border-color: color-mix(in srgb, var(--green) 40%, transparent);
+  color: var(--green);
+}
+
+.badge.apikey {
+  border-color: color-mix(in srgb, var(--peach) 40%, transparent);
+  color: var(--peach);
+}
+
+/* Hover-Popover: kompakter Text in der Zeile, Details im Hover. */
+.hover-pop {
+  position: relative;
+  cursor: default;
+}
+
+.hover-pop .pop {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  min-width: 13rem;
+  max-width: 26rem;
+  flex-direction: column;
+  gap: 0.4rem;
+  background: var(--crust);
+  border: 1px solid var(--surface1);
+  border-radius: 9px;
+  padding: 0.7rem 0.9rem;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+
+.hover-pop:hover .pop {
+  display: flex;
+}
+
+.pop-path {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text);
+  word-break: break-all;
+}
+
+/* Zugeordnete Projekte: Anzahl in der Zeile, Liste im Hover. */
+.assigned {
+  color: var(--subtext);
+  font-size: 0.8rem;
+  border-bottom: 1px dotted var(--surface2);
+  padding-bottom: 1px;
+}
+
+.pop-item {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.empty {
+  color: var(--overlay);
+}
+
+.error {
+  color: var(--red);
+  white-space: pre-wrap;
+}
+
+/* ---------- Dialoge ---------- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  border-radius: 12px;
+  padding: 1.75rem 2rem;
+  min-width: 26rem;
+  max-width: 34rem;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+
+.dialog h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.dialog p {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--subtext);
+}
+
+.dialog .hint {
+  color: var(--overlay);
+  font-size: 0.85rem;
+}
+
+.hint.busy {
+  color: var(--blue);
+}
+
+.dialog .field {
+  display: grid;
+  grid-template-columns: 6rem 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--subtext);
+  font-size: 0.85rem;
+}
+
+.icon-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.workdirs {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+
+.workdirs .icon-path {
+  max-width: none;
+}
+
+/* Mehrzeilige Felder: Label oben ausrichten statt vertikal zentriert. */
+.dialog .field.field-top {
+  align-items: start;
+  padding-top: 0.15rem;
+}
+
+.icon-path {
+  font-family: var(--mono);
+  color: var(--overlay);
+  font-size: 0.75rem;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialog .pools {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.25rem 0;
+}
+
+.chip {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+}
+
+.chip.new {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.arrow {
+  color: var(--overlay);
+}
+
+.dialog .checkline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.dialog .field .checkline {
+  font-size: 0.85rem;
+  color: var(--subtext);
+}
+
+.dialog .affected {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.dialog .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+/* ---------- Formulare (Pools-Dialoge) ---------- */
+
+form.dialog input:not([type="checkbox"]) {
+  width: 100%;
+}
