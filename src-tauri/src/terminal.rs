@@ -40,6 +40,7 @@ pub fn open_terminal(app: AppHandle, project: String) -> Result<(), String> {
 
 /// Tritt die Aktivierung an den nächsten startenden Prozess mit dieser
 /// Bundle-ID ab (der Terminal-Prozess läuft unter derselben).
+#[cfg(target_os = "macos")]
 fn yield_activation_to_bundle(bundle_id: &str) {
   use objc2::MainThreadMarker;
   use objc2_app_kit::NSApplication;
@@ -50,13 +51,26 @@ fn yield_activation_to_bundle(bundle_id: &str) {
     .yieldActivationToApplicationWithBundleIdentifier(&NSString::from_str(bundle_id));
 }
 
+/// Linux kennt keine kooperative Aktivierungsabtretung.
+#[cfg(target_os = "linux")]
+fn yield_activation_to_bundle(_bundle_id: &str) {}
+
 /// Selbst-Aktivierung des frisch gestarteten Terminal-Prozesses (Ready-Event);
 /// die Gegenseite hat vorher per yield abgetreten.
+#[cfg(target_os = "macos")]
 pub fn activate_self(app: &AppHandle) {
   use objc2::MainThreadMarker;
   use objc2_app_kit::NSApplication;
   let mtm = MainThreadMarker::new().expect("activate_self läuft nicht auf dem Main-Thread");
   NSApplication::sharedApplication(mtm).activate();
+  if let Some(window) = app.webview_windows().values().next() {
+    window.set_focus().expect("Terminal-Fenster nicht fokussierbar");
+  }
+}
+
+/// Linux: Fenster ohne NSApplication über die Tauri-API fokussieren.
+#[cfg(target_os = "linux")]
+pub fn activate_self(app: &AppHandle) {
   if let Some(window) = app.webview_windows().values().next() {
     window.set_focus().expect("Terminal-Fenster nicht fokussierbar");
   }
@@ -95,9 +109,14 @@ pub fn set_dock_icon(path: &str) {
   }
 }
 
+/// Linux kennt kein Dock-Icon pro Prozess.
+#[cfg(target_os = "linux")]
+pub fn set_dock_icon(_path: &str) {}
+
 /// Holt das Terminal-Fenster eines laufenden Projekts in den Vordergrund:
 /// aktiviert den Terminal-Prozess über seine PID. Aktivierung ist seit
 /// macOS 14 kooperativ — die Tray-App tritt sie vorher ab.
+#[cfg(target_os = "macos")]
 pub fn focus_terminal(pid: u32) {
   use objc2::MainThreadMarker;
   use objc2_app_kit::{NSApplication, NSApplicationActivationOptions, NSRunningApplication};
@@ -110,6 +129,11 @@ pub fn focus_terminal(pid: u32) {
   NSApplication::sharedApplication(mtm).yieldActivationToApplication(&term);
   term.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
 }
+
+/// Linux: Fremdprozess-Fokus über die PID steht ohne NSRunningApplication
+/// nicht zur Verfügung.
+#[cfg(target_os = "linux")]
+pub fn focus_terminal(_pid: u32) {}
 
 /// Baut das Terminal-Fenster des Terminal-Prozesses. Die PTY entsteht erst,
 /// wenn das Fenster geladen ist und `term_start` ruft — so gehen keine
@@ -135,6 +159,10 @@ pub fn build_window(
   let builder = builder
     .title_bar_style(tauri::TitleBarStyle::Overlay)
     .hidden_title(true);
+
+  // Linux/GNOME: keine GTK-Deko — eigene Titelleiste im Header (terminal.html).
+  #[cfg(target_os = "linux")]
+  let builder = builder.decorations(false);
 
   builder.build()?;
   Ok(())

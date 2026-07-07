@@ -1,6 +1,6 @@
 [package]
 name = "ai-control"
-version = "0.1.1"
+version = "0.2.0"
 description = "Pool- und Session-Verwaltung für Claude Code"
 authors = ["marcus.hinz"]
 license = "MIT"
@@ -21,7 +21,7 @@ tauri-build = { version = "2.6.3", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.11.3", features = ["tray-icon", "image-png"] }
+tauri = { version = "2.11.3", features = ["macos-private-api", "tray-icon", "image-png"] }
 tauri-plugin-log = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
@@ -30,6 +30,10 @@ sha2 = "0.10"
 portable-pty = "0.9"
 uuid = { version = "1", features = ["v4"] }
 keyring = { version = "3", features = ["apple-native", "sync-secret-service", "windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "5"
+glib = "0.18"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

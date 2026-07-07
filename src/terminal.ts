@@ -29,6 +29,29 @@ window.addEventListener("unhandledrejection", (e) =>
 const project = new URLSearchParams(location.search).get("project")!;
 const win = getCurrentWebviewWindow();
 
+// macOS nutzt die native Ampel (Overlay-Titelbar); sonst eigene Fensterknöpfe
+// im Header (Linux ist dekorationslos, siehe terminal.rs).
+const isMac = /Mac|Macintosh/.test(navigator.userAgent);
+document.documentElement.dataset.platform = isMac ? "mac" : "other";
+if (!isMac) {
+  document
+    .getElementById("win-min")
+    ?.addEventListener("click", () => win.minimize());
+  document
+    .getElementById("win-max")
+    ?.addEventListener("click", () => win.toggleMaximize());
+  document
+    .getElementById("win-close")
+    ?.addEventListener("click", () => win.close());
+  // Resize-Zonen: dekorationslose Fenster haben keinen nativen Rand.
+  for (const g of document.querySelectorAll<HTMLElement>(".grip")) {
+    g.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      win.startResizeDragging(g.dataset.dir as never);
+    });
+  }
+}
+
 // Fensterhintergrund beim Öffnen kommt aus terminal.rs (theme_background);
 // dort nicht gepflegte Themes fallen auf Mocha zurück (nur kurzer Moment
 // bis die Webview lädt).
@@ -427,11 +450,15 @@ header.style.background = picked.header;
 header.style.borderBottomColor = picked.border;
 header.style.color = theme.foreground;
 
+// Globale Schriftgröße (settings.json: terminalFontSize), ein Wert für alle.
+const DEFAULT_FONT_SIZE = 13;
+let fontSize = await invoke<number>("terminal_font_size");
+
 const term = new Terminal({
   // Ligatur-Addon nutzt die Character-Joiner-API (Proposed API)
   allowProposedApi: true,
   fontFamily: '"JetBrains Mono", Menlo, monospace',
-  fontSize: 13,
+  fontSize,
   fontWeightBold: "600",
   lineHeight: 1.0,
   letterSpacing: 0,
@@ -443,6 +470,14 @@ const term = new Terminal({
 const fit = new FitAddon();
 term.loadAddon(fit);
 
+// Ctrl/Cmd + +/-/0: Schriftgröße global anpassen, sofort im aktuellen Fenster.
+function applyFontSize(px: number) {
+  fontSize = Math.max(8, Math.min(24, px));
+  term.options.fontSize = fontSize;
+  fit.fit();
+  invoke("set_terminal_font_size", { size: fontSize });
+}
+
 // Shift+Enter als CSI-u-Sequenz senden (Zeilenumbruch in Claude Code,
 // auch bei nicht-leerer Zeile). Neben keydown muss auch keypress unter-
 // drückt werden, sonst sendet xterm.js zusätzlich \r und submittet damit.
@@ -451,13 +486,27 @@ term.attachCustomKeyEventHandler((e) => {
     if (e.type === "keydown") invoke("term_write", { data: "\x1b[13;2u" });
     return false;
   }
+  if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+    if (e.key === "+" || e.key === "=") {
+      if (e.type === "keydown") applyFontSize(fontSize + 1);
+      return false;
+    }
+    if (e.key === "-" || e.key === "_") {
+      if (e.type === "keydown") applyFontSize(fontSize - 1);
+      return false;
+    }
+    if (e.key === "0") {
+      if (e.type === "keydown") applyFontSize(DEFAULT_FONT_SIZE);
+      return false;
+    }
+  }
   return true;
 });
 
 // Font muss geladen sein, bevor WebGL den Glyphen-Atlas aufbaut —
 // beide verwendeten Gewichte (400 normal, 600 bold).
-await document.fonts.load('13px "JetBrains Mono"');
-await document.fonts.load('600 13px "JetBrains Mono"');
+await document.fonts.load(`${fontSize}px "JetBrains Mono"`);
+await document.fonts.load(`600 ${fontSize}px "JetBrains Mono"`);
 term.open(document.getElementById("term")!);
 // Reihenfolge laut Addon-Doku: Ligaturen vor WebGL aktivieren.
 term.loadAddon(new LigaturesAddon());

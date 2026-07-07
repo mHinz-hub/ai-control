@@ -303,12 +303,12 @@ fn sync_session_context(repo: &std::path::Path, project: &str) {
   }
 }
 
-/// Session-Watcher im Tray-Prozess: pollt die laufenden Projekte; wechselt eines
-/// von „läuft" auf „läuft nicht mehr", ist die Session beendet → Kontext syncen.
+/// Session-Watcher: pollt die laufenden Projekte; wechselt eines von „läuft"
+/// auf „läuft nicht mehr", ist die Session beendet → Kontext syncen.
 /// Erkennung über das Verschwinden des Prozesses, greift daher auch bei
 /// HUP/Kill (im sterbenden Prozess liefe kein Hook mehr).
-/// Ändert sich Projektliste oder Laufstatus, baut er das Tray-Menü neu auf.
-fn spawn_session_watcher(app: tauri::AppHandle) {
+/// Das Popup zeigt den Laufstatus selbst über sein 2-s-Polling.
+fn spawn_session_watcher() {
   std::thread::spawn(move || {
     let paths = Paths::real();
     let mut state = project_state(&paths);
@@ -326,7 +326,7 @@ fn spawn_session_watcher(app: tauri::AppHandle) {
         .map(|(name, _)| name)
         .collect();
       // Nur syncen, wenn zugestimmt UND das Projekt in einem Git-Repo liegt —
-      // der Tray verlangt kein Repo, er nutzt es nur, falls vorhanden.
+      // der Watcher verlangt kein Repo, er nutzt es nur, falls vorhanden.
       if !ended.is_empty() && sync_on_session_end(&paths) {
         for project in ended {
           if let Ok(dir) = project_dir(&paths, project) {
@@ -336,18 +336,6 @@ fn spawn_session_watcher(app: tauri::AppHandle) {
           }
         }
       }
-      // Menü-Objekte gehören auf den Main-Thread.
-      let handle = app.clone();
-      app
-        .run_on_main_thread(move || {
-          let menu = tray_menu(&handle).expect("Tray-Menü nicht aufbaubar");
-          handle
-            .tray_by_id("main")
-            .expect("Tray-Icon fehlt")
-            .set_menu(Some(menu))
-            .expect("Tray-Menü nicht setzbar");
-        })
-        .expect("Main-Thread nicht erreichbar");
       state = current;
     }
   });
@@ -556,6 +544,8 @@ fn create_project_full_in(
   if todo {
     set_todo_in(paths, name, true)?;
   }
+  #[cfg(target_os = "linux")]
+  write_terminal_desktop(paths, name, &cfg.terminal);
   Ok(())
 }
 
@@ -618,7 +608,15 @@ fn add_project_in(paths: &Paths, path: &str) -> Result<(), String> {
     .to_string_lossy()
     .into_owned();
   check_name(&name)?;
-  register_project(paths, &name, &dir)
+  register_project(paths, &name, &dir)?;
+  #[cfg(target_os = "linux")]
+  {
+    let cfg = read_project_config_in(paths, &name)
+      .map(|c| c.terminal)
+      .unwrap_or_default();
+    write_terminal_desktop(paths, &name, &cfg);
+  }
+  Ok(())
 }
 
 #[cfg(test)]
@@ -739,7 +737,10 @@ fn delete_project_in(paths: &Paths, name: &str, delete_work_dirs: bool) -> Resul
     }
   }
   fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
-  unregister_project(paths, name)
+  unregister_project(paths, name)?;
+  #[cfg(target_os = "linux")]
+  remove_terminal_desktop(paths, name);
+  Ok(())
 }
 
 fn read_project_config_in(paths: &Paths, project: &str) -> Result<ProjectConfig, String> {
@@ -809,7 +810,10 @@ fn set_terminal_config_in(
     }
   }
   cfg.terminal = terminal;
-  write_project_config_in(paths, project, &cfg)
+  write_project_config_in(paths, project, &cfg)?;
+  #[cfg(target_os = "linux")]
+  write_terminal_desktop(paths, project, &cfg.terminal);
+  Ok(())
 }
 
 /// Icon-Pfad einer Projekt-Config auflösen: relative Namen liegen im
@@ -819,6 +823,78 @@ fn resolve_icon_path(paths: &Paths, icon: &str) -> PathBuf {
     PathBuf::from(icon)
   } else {
     paths.icons_dir().join(icon)
+  }
+}
+
+/// ~/.local/share/applications — Ziel der pro-Terminal-.desktop-Dateien.
+/// paths-abhängig (nicht $HOME direkt), damit Tests in ihr tmp-home schreiben.
+#[cfg(target_os = "linux")]
+fn applications_dir(paths: &Paths) -> PathBuf {
+  paths.home.join(".local/share/applications")
+}
+
+/// Schreibt/aktualisiert die .desktop eines Projekts: dash-to-dock ordnet dem
+/// Fenster (app_id `aicontrol-<projekt>`, via set_prgname) darüber das Projekt-
+/// Icon zu. NoDisplay=true hält den App-Starter sauber.
+#[cfg(target_os = "linux")]
+pub(crate) fn write_terminal_desktop(paths: &Paths, project: &str, cfg: &TerminalConfig) {
+  let dir = applications_dir(paths);
+  if fs::create_dir_all(&dir).is_err() {
+    return;
+  }
+  let exec = std::env::current_exe()
+    .ok()
+    .and_then(|p| p.to_str().map(str::to_string))
+    .unwrap_or_else(|| "ai-control".into());
+  let icon_line = cfg
+    .icon
+    .as_deref()
+    .map(|i| resolve_icon_path(paths, i))
+    .filter(|p| p.exists())
+    .and_then(|p| p.to_str().map(str::to_string))
+    .map(|p| format!("Icon={p}\n"))
+    .unwrap_or_default();
+  let content = format!(
+    "[Desktop Entry]\nType=Application\nName={project}\nExec={exec} --terminal {project}\n\
+     {icon_line}StartupWMClass=aicontrol-{project}\nNoDisplay=true\n"
+  );
+  let _ = fs::write(dir.join(format!("aicontrol-{project}.desktop")), content);
+}
+
+/// Entfernt die .desktop eines Projekts (beim Löschen).
+#[cfg(target_os = "linux")]
+pub(crate) fn remove_terminal_desktop(paths: &Paths, project: &str) {
+  let _ = fs::remove_file(applications_dir(paths).join(format!("aicontrol-{project}.desktop")));
+}
+
+/// Beim App-Start: für jedes registrierte Projekt die .desktop neu schreiben und
+/// verwaiste (kein registriertes Projekt mehr) entfernen. Dadurch sind sie immer
+/// vorhanden und aktuell, bevor überhaupt ein Terminal startet.
+#[cfg(target_os = "linux")]
+fn sync_all_desktops(paths: &Paths) {
+  let Ok(reg) = load_registry(paths) else {
+    return;
+  };
+  for project in reg.keys() {
+    let cfg = read_project_config_in(paths, project)
+      .map(|c| c.terminal)
+      .unwrap_or_default();
+    write_terminal_desktop(paths, project, &cfg);
+  }
+  let dir = applications_dir(paths);
+  if let Ok(entries) = fs::read_dir(&dir) {
+    for e in entries.flatten() {
+      let name = e.file_name();
+      let Some(name) = name.to_str() else { continue };
+      if let Some(project) = name
+        .strip_prefix("aicontrol-")
+        .and_then(|n| n.strip_suffix(".desktop"))
+      {
+        if !reg.contains_key(project) {
+          let _ = fs::remove_file(e.path());
+        }
+      }
+    }
   }
 }
 
@@ -837,84 +913,19 @@ fn project_icon(project: String) -> Result<Option<String>, String> {
     .and_then(|e| e.to_str())
     .is_some_and(|e| e.eq_ignore_ascii_case("icns"));
   let png = if is_icns {
-    let tmp = std::env::temp_dir().join(format!("ai-control-icon-{project}.png"));
-    let out = std::process::Command::new("sips")
-      .args(["-s", "format", "png"])
-      .arg(&path)
-      .arg("--out")
-      .arg(&tmp)
-      .output()
-      .map_err(|e| format!("sips: {e}"))?;
-    if !out.status.success() {
-      return Err(format!("sips: {}", String::from_utf8_lossy(&out.stderr)));
-    }
-    let bytes = fs::read(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    let _ = fs::remove_file(&tmp);
-    bytes
+    icns_to_png_bytes(&path, &project)?
   } else {
     fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?
   };
   Ok(Some(format!("data:image/png;base64,{}", STANDARD.encode(png))))
 }
 
-/// Menü-Icon fürs Tray: ganz links der Status-Punkt (grün = läuft), daneben
-/// das Projekt-Icon (sips konvertiert, auch ICNS). Ein RGBA-Bild 56×36 px;
-/// muda rendert Menü-Icons mit 18 pt Höhe und proportionaler Breite.
-fn menu_icon(
-  paths: &Paths,
-  project: &str,
-  running: bool,
-) -> Result<tauri::image::Image<'static>, String> {
-  const H: usize = 36;
-  const DOT_W: usize = 20;
-  const W: usize = DOT_W + H;
-  let mut canvas = vec![0u8; W * H * 4];
-  if running {
-    // macOS-Systemgrün, weicher Rand über Alpha.
-    let (cx, cy, r) = (10.0f32, 18.0f32, 7.0f32);
-    for y in 0..H {
-      for x in 0..DOT_W {
-        let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
-        let a = (r - d + 0.5).clamp(0.0, 1.0);
-        if a > 0.0 {
-          let i = (y * W + x) * 4;
-          canvas[i..i + 4].copy_from_slice(&[52, 199, 89, (a * 255.0) as u8]);
-        }
-      }
-    }
-  }
-  if let Some(icon) = read_project_config_in(paths, project)?.terminal.icon {
-    // Nicht ladbares Icon blockiert den Tray nicht (Muster set_dock_icon):
-    // Meldung, Eintrag erscheint ohne Projekt-Icon.
-    match project_icon_rgba_36(paths, project, &icon) {
-      Ok(img) => {
-        let (iw, ih) = (img.width() as usize, img.height() as usize);
-        let rgba = img.rgba();
-        for y in 0..ih.min(H) {
-          for x in 0..iw.min(H) {
-            let src_i = (y * iw + x) * 4;
-            let dst_i = (y * W + DOT_W + x) * 4;
-            canvas[dst_i..dst_i + 4].copy_from_slice(&rgba[src_i..src_i + 4]);
-          }
-        }
-      }
-      Err(e) => eprintln!("Tray-Icon {project}: {e}"),
-    }
-  }
-  Ok(tauri::image::Image::new_owned(canvas, W as u32, H as u32))
-}
-
-/// Projekt-Icon als 36×36-RGBA (sips konvertiert, auch ICNS).
-fn project_icon_rgba_36(
-  paths: &Paths,
-  project: &str,
-  icon: &str,
-) -> Result<tauri::image::Image<'static>, String> {
-  let src = resolve_icon_path(paths, icon);
+/// ICNS → PNG-Bytes via sips (nur macOS; Linux hat kein ICNS).
+fn icns_to_png_bytes(src: &std::path::Path, project: &str) -> Result<Vec<u8>, String> {
   let tmp = std::env::temp_dir().join(format!("ai-control-tray-icon-{project}.png"));
   let out = Command::new("sips")
-    .args(["-s", "format", "png", "-z", "36", "36"])
-    .arg(&src)
+    .args(["-s", "format", "png"])
+    .arg(src)
     .arg("--out")
     .arg(&tmp)
     .output()
@@ -924,7 +935,7 @@ fn project_icon_rgba_36(
   }
   let bytes = fs::read(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
   let _ = fs::remove_file(&tmp);
-  tauri::image::Image::from_bytes(&bytes).map_err(|e| e.to_string())
+  Ok(bytes)
 }
 
 /// Terminal-Einstellungen eines Projekts, für den Terminal-Prozess.
@@ -1818,6 +1829,33 @@ fn set_sync_setting(enabled: bool) -> Result<(), String> {
   set_sync_on_session_end_in(&Paths::real(), enabled)
 }
 
+/// Terminal-Schriftgröße (settings.json: terminalFontSize), ein Wert für alle
+/// Terminals. Default 13.
+#[tauri::command]
+fn terminal_font_size() -> u32 {
+  fs::read_to_string(Paths::real().config_dir().join(APP_SETTINGS_FILE))
+    .ok()
+    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+    .and_then(|v| v["terminalFontSize"].as_u64())
+    .map(|n| n as u32)
+    .unwrap_or(13)
+}
+
+/// Setzt die Schriftgröße; erhält übrige App-settings.
+#[tauri::command]
+fn set_terminal_font_size(size: u32) -> Result<(), String> {
+  let paths = Paths::real();
+  let path = paths.config_dir().join(APP_SETTINGS_FILE);
+  let mut v: serde_json::Value = fs::read_to_string(&path)
+    .ok()
+    .and_then(|s| serde_json::from_str(&s).ok())
+    .unwrap_or_else(|| serde_json::json!({}));
+  v["terminalFontSize"] = serde_json::json!(size);
+  fs::create_dir_all(paths.config_dir()).map_err(|e| e.to_string())?;
+  let raw = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
+  fs::write(&path, raw + "\n").map_err(|e| format!("{}: {e}", path.display()))
+}
+
 /// Verlinkt die synced Runtime eines bestehenden Pools. Nur bei idlem Pool —
 /// sonst würde das Transkript der laufenden Session ersetzt.
 #[tauri::command]
@@ -1839,6 +1877,10 @@ pub fn run() {
     // damit jedes Terminal ein eigenes Dock-Icon bekommt.
     Some("--terminal") => {
       let project = args.next().expect("--terminal braucht einen Projektnamen");
+      // Linux: eigene Wayland-app_id pro Terminal-Prozess -> eigener Dock-Eintrag
+      // (muss vor dem GTK-Init stehen). Test, ob set_prgname die app_id setzt.
+      #[cfg(target_os = "linux")]
+      glib::set_prgname(Some(format!("aicontrol-{project}").as_str()));
       let icon = terminal_config(&project)
         .expect("Projekt-Config nicht lesbar")
         .icon
@@ -1861,38 +1903,16 @@ pub fn run() {
           }
         });
     }
-    _ => main_builder()
-      .run(context)
-      .expect("error while running tauri application"),
+    _ => {
+      // Linux: feste Wayland-app_id fürs Hauptfenster (vor GTK-Init) — GNOME
+      // ordnet dem offenen Fenster über ai-control.desktop das App-Icon zu.
+      #[cfg(target_os = "linux")]
+      glib::set_prgname(Some("ai-control"));
+      main_builder()
+        .run(context)
+        .expect("error while running tauri application");
+    }
   }
-}
-
-/// Tray-Menü: pro Projekt ein Eintrag — Status-Punkt, Projekt-Icon, Name.
-/// Klick startet das Projekt bzw. holt das laufende Terminal nach vorn.
-fn tray_menu(
-  app: &tauri::AppHandle,
-) -> Result<tauri::menu::Menu<tauri::Wry>, Box<dyn std::error::Error>> {
-  use tauri::menu::{IconMenuItem, Menu, MenuItem, PredefinedMenuItem};
-  let paths = Paths::real();
-  let menu = Menu::new(app)?;
-  menu.append(&MenuItem::with_id(app, "open", "Öffnen", true, None::<&str>)?)?;
-  menu.append(&PredefinedMenuItem::separator(app)?)?;
-  let mut projects = list_projects_in(&paths)?;
-  projects.sort_by(|a, b| a.name.cmp(&b.name));
-  for p in projects {
-    let icon = menu_icon(&paths, &p.name, p.running)?;
-    menu.append(&IconMenuItem::with_id(
-      app,
-      format!("project:{}", p.name),
-      &p.name,
-      true,
-      Some(icon),
-      None::<&str>,
-    )?)?;
-  }
-  menu.append(&PredefinedMenuItem::separator(app)?)?;
-  menu.append(&MenuItem::with_id(app, "quit", "Beenden", true, None::<&str>)?)?;
-  Ok(menu)
 }
 
 /// Tray-Klick auf ein Projekt: läuft es, kommt das Terminal-Fenster nach vorn,
@@ -1905,6 +1925,72 @@ fn start_or_focus(app: &tauri::AppHandle, project: &str) {
         eprintln!("{project} starten: {e}");
       }
     }
+  }
+}
+
+/// Tray-/Popup-Klick: Projekt starten oder das laufende Terminal fokussieren.
+#[tauri::command]
+fn start_or_focus_cmd(app: tauri::AppHandle, project: String) {
+  start_or_focus(&app, &project);
+}
+
+/// Popup-Fußzeile „Öffnen": das Hauptfenster zeigen.
+#[tauri::command]
+fn open_main_window(app: tauri::AppHandle) {
+  use tauri::Manager;
+  if let Some(w) = app.get_webview_window("main") {
+    let _ = w.show();
+    let _ = w.set_focus();
+  }
+}
+
+/// Popup-Fußzeile „Beenden": App verlassen.
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+  app.exit(0);
+}
+
+/// D-Bus-Relay für die GNOME-Extension: Show()/Hide() steuern das Popup-Fenster.
+/// Die Extension ruft Show() beim Panel-Klick und positioniert das Fenster selbst.
+#[cfg(target_os = "linux")]
+struct PopupService {
+  app: tauri::AppHandle,
+}
+
+#[cfg(target_os = "linux")]
+#[zbus::interface(name = "com.aicontrol.Popup1")]
+impl PopupService {
+  fn show(&self) {
+    use tauri::Manager;
+    let app = self.app.clone();
+    let win = app.clone();
+    let _ = app.run_on_main_thread(move || {
+      if let Some(w) = win.get_webview_window("popup") {
+        let _ = w.show();
+        let _ = w.set_focus();
+      }
+    });
+  }
+  fn hide(&self) {
+    use tauri::Manager;
+    let app = self.app.clone();
+    let win = app.clone();
+    let _ = app.run_on_main_thread(move || {
+      if let Some(w) = win.get_webview_window("popup") {
+        let _ = w.hide();
+      }
+    });
+  }
+}
+
+#[cfg(target_os = "linux")]
+fn serve_popup_dbus(app: tauri::AppHandle) -> zbus::Result<()> {
+  let _conn = zbus::blocking::connection::Builder::session()?
+    .name("com.aicontrol.Popup")?
+    .serve_at("/com/aicontrol/Popup", PopupService { app })?
+    .build()?;
+  loop {
+    std::thread::park();
   }
 }
 
@@ -1931,42 +2017,105 @@ fn main_builder() -> tauri::Builder<tauri::Wry> {
       #[cfg(target_os = "macos")]
       app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-      // Session-Watcher: synct bei Session-Ende (Prozess verschwindet) und
-      // hält das Tray-Menü aktuell.
-      spawn_session_watcher(app.handle().clone());
+      // Session-Watcher: synct bei Session-Ende (Prozess verschwindet).
+      spawn_session_watcher();
+
+      // Alle pro-Terminal-.desktop-Dateien neu schreiben + verwaiste entfernen,
+      // damit sie da sind, bevor ein Terminal startet.
+      #[cfg(target_os = "linux")]
+      sync_all_desktops(&Paths::real());
 
       // Fenster im Code statt in tauri.conf.json, damit der Terminal-Prozess
       // (gleiches Binary, gleiche Config) kein main-Fenster anlegt.
-      tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+      let main_win = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
         .title("ai-control")
         .inner_size(800.0, 600.0)
+        // Fenster-Icon (_NET_WM_ICON) — deckt X11-DEs wie XFCE direkt ab,
+        // unabhängig von der .desktop-Zuordnung; auf Windows das Titel-/Taskbar-Icon.
+        .icon(tauri::image::Image::from_bytes(include_bytes!(
+          "../icons/128x128.png"
+        ))?)?
+        .visible(false);
+      // Wie die Terminal-Fenster: eigener Header als Titelleiste. macOS behält die
+      // Ampel (Overlay), Linux ist dekorationslos (eigene Fensterknöpfe im Header).
+      #[cfg(target_os = "macos")]
+      let main_win = main_win
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true);
+      #[cfg(target_os = "linux")]
+      let main_win = main_win.decorations(false);
+      main_win.build()?;
+
+      // Rahmenloses Popup-Fenster — dieselbe Optik auf allen Plattformen. Der
+      // Trigger unterscheidet sich: Linux über die GNOME-Extension/D-Bus,
+      // macOS/Windows über den nativen Tray-Klick.
+      tauri::WebviewWindowBuilder::new(app, "popup", tauri::WebviewUrl::App("popup.html".into()))
+        .title("ai-control-popup")
+        .inner_size(320.0, 300.0)
+        .decorations(false)
         .visible(false)
+        .transparent(true)
+        .skip_taskbar(true)
+        .always_on_top(true)
+        .resizable(false)
         .build()?;
 
-      let menu = tray_menu(app.handle())?;
-      tauri::tray::TrayIconBuilder::with_id("main")
-        // include_bytes! statt default_window_icon: cargo trackt die Datei,
-        // neu generierte Icons landen damit sicher im nächsten Build.
-        .icon(tauri::image::Image::from_bytes(include_bytes!(
-          "../icons/trayTemplate.png"
-        ))?)
-        // Template-Icon: macOS färbt es passend zur Menüleiste ein.
-        .icon_as_template(true)
-        .menu(&menu)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-          "open" => {
-            let w = app.get_webview_window("main").unwrap();
-            w.show().unwrap();
-            w.set_focus().unwrap();
-          }
-          "quit" => app.exit(0),
-          id => {
-            if let Some(project) = id.strip_prefix("project:") {
-              start_or_focus(app, project);
+      // macOS/Windows: natives Tray-Icon; Links-Klick öffnet das Popup, am
+      // Icon-Rect ausgerichtet (macOS unter dem Menüleisten-Icon, Windows drüber).
+      #[cfg(not(target_os = "linux"))]
+      {
+        use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+        #[cfg(target_os = "macos")]
+        let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/trayTemplate.png"))?;
+        #[cfg(not(target_os = "macos"))]
+        let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
+        let builder = TrayIconBuilder::with_id("main").icon(icon);
+        #[cfg(target_os = "macos")]
+        let builder = builder.icon_as_template(true);
+        builder
+          .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+              button: MouseButton::Left,
+              button_state: MouseButtonState::Up,
+              rect,
+              ..
+            } = event
+            {
+              if let Some(win) = tray.app_handle().get_webview_window("popup") {
+                let scale = win.scale_factor().unwrap_or(1.0);
+                let pos = rect.position.to_physical::<f64>(scale);
+                let size = rect.size.to_physical::<f64>(scale);
+                let win_w = win.outer_size().map(|s| s.width as f64).unwrap_or(320.0);
+                // Rechte Popup-Kante an der rechten Icon-Kante ausrichten.
+                let x = (pos.x + size.width - win_w).max(0.0);
+                #[cfg(target_os = "macos")]
+                let y = pos.y + size.height;
+                #[cfg(not(target_os = "macos"))]
+                let y = {
+                  let win_h = win.outer_size().map(|s| s.height as f64).unwrap_or(300.0);
+                  (pos.y - win_h).max(0.0)
+                };
+                let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
+                let _ = win.show();
+                let _ = win.set_focus();
+              }
             }
+          })
+          .build(app)?;
+      }
+
+      // Linux/GNOME: D-Bus-Relay. Die Shell-Extension (ai-control-popup@local)
+      // ruft Show() und schiebt das Fenster unter ihren Panel-Button — GNOME
+      // liefert der App selbst keinen Tray-Klick.
+      #[cfg(target_os = "linux")]
+      {
+        let app_dbus = app.handle().clone();
+        std::thread::spawn(move || {
+          if let Err(e) = serve_popup_dbus(app_dbus) {
+            eprintln!("D-Bus-Popup-Dienst: {e}");
           }
-        })
-        .build(app)?;
+        });
+      }
 
       Ok(())
     })
@@ -1975,6 +2124,12 @@ fn main_builder() -> tauri::Builder<tauri::Wry> {
       if let tauri::WindowEvent::CloseRequested { api, .. } = event {
         api.prevent_close();
         window.hide().unwrap();
+      }
+      // Popup schließt bei Fokusverlust.
+      if let tauri::WindowEvent::Focused(false) = event {
+        if window.label() == "popup" {
+          let _ = window.hide();
+        }
       }
     })
     .invoke_handler(tauri::generate_handler![
@@ -2002,8 +2157,13 @@ fn main_builder() -> tauri::Builder<tauri::Wry> {
       usage_stats,
       stop_project,
       restart_project,
+      start_or_focus_cmd,
+      open_main_window,
+      quit_app,
       sync_setting,
       set_sync_setting,
+      terminal_font_size,
+      set_terminal_font_size,
       link_pool_runtime,
       oauth_login,
       keychain_status,
@@ -2036,7 +2196,9 @@ fn terminal_builder(project: String) -> tauri::Builder<tauri::Wry> {
       // Header im Terminal-Prozess: Projektliste, Icon und Pool-Name.
       list_projects,
       project_icon,
-      pool_label
+      pool_label,
+      terminal_font_size,
+      set_terminal_font_size
     ])
 }
 

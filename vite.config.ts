@@ -17,6 +17,7 @@ export default defineConfig(async () => ({
       input: {
         main: new URL("./index.html", import.meta.url).pathname,
         terminal: new URL("./terminal.html", import.meta.url).pathname,
+        popup: new URL("./popup.html", import.meta.url).pathname,
       },
     },
   },

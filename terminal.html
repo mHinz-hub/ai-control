@@ -16,13 +16,13 @@
         flex-direction: column;
       }
       header {
-        height: 44px;
+        height: 40px;
         flex: none;
         display: flex;
         align-items: center;
         gap: 10px;
-        /* links Platz für die macOS-Ampel (Overlay-Titelbar) */
-        padding: 0 16px 0 84px;
+        /* Linux: schmaler Rand links; macOS: Ampel-Platz (Override unten) */
+        padding: 0 0 0 16px;
         background: #181825;
         border-bottom: 1px solid #313244;
         color: #cdd6f4;
@@ -33,6 +33,14 @@
         user-select: none;
         -webkit-user-select: none;
         cursor: default;
+      }
+      /* macOS: Platz links für die Ampel, eigene Fensterknöpfe aus. */
+      :root[data-platform="mac"] header {
+        padding-left: 84px;
+        padding-right: 16px;
+      }
+      :root[data-platform="mac"] #winbtns {
+        display: none;
       }
       #project-icon {
         width: 18px;
@@ -52,6 +60,113 @@
       }
       #pool:empty {
         display: none;
+      }
+      /* Eigene Fensterknöpfe (Linux): rechtsbündig, volle Header-Höhe. */
+      #winbtns {
+        margin-left: 8px;
+        display: flex;
+        align-self: stretch;
+      }
+      #pool:empty + #winbtns {
+        margin-left: auto;
+      }
+      .winbtn {
+        width: 44px;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        background: transparent;
+        color: inherit;
+        cursor: default;
+        transition: background 0.12s ease;
+      }
+      .winbtn svg {
+        stroke: currentColor;
+        stroke-width: 1.2;
+        opacity: 0.8;
+      }
+      .winbtn:hover {
+        background: #313244;
+      }
+      .winbtn:hover svg {
+        opacity: 1;
+      }
+      .winbtn.close:hover {
+        background: #f38ba8;
+        color: #11111b;
+      }
+      /* Resize-Zonen für das dekorationslose Fenster (nur Linux). */
+      #resize-grips {
+        display: none;
+      }
+      :root[data-platform="other"] #resize-grips {
+        display: block;
+      }
+      .grip {
+        position: fixed;
+        z-index: 100;
+      }
+      .grip.n {
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        cursor: ns-resize;
+      }
+      .grip.s {
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        cursor: ns-resize;
+      }
+      .grip.w {
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 4px;
+        cursor: ew-resize;
+      }
+      .grip.e {
+        top: 0;
+        bottom: 0;
+        right: 0;
+        width: 4px;
+        cursor: ew-resize;
+      }
+      .grip.nw {
+        top: 0;
+        left: 0;
+        width: 9px;
+        height: 9px;
+        cursor: nwse-resize;
+        z-index: 101;
+      }
+      .grip.ne {
+        top: 0;
+        right: 0;
+        width: 9px;
+        height: 9px;
+        cursor: nesw-resize;
+        z-index: 101;
+      }
+      .grip.sw {
+        bottom: 0;
+        left: 0;
+        width: 9px;
+        height: 9px;
+        cursor: nesw-resize;
+        z-index: 101;
+      }
+      .grip.se {
+        bottom: 0;
+        right: 0;
+        width: 9px;
+        height: 9px;
+        cursor: nwse-resize;
+        z-index: 101;
       }
       #term {
         flex: 1;
@@ -75,8 +190,29 @@
       <img id="project-icon" hidden data-tauri-drag-region />
       <span id="project-name" data-tauri-drag-region></span>
       <span id="pool"></span>
+      <div id="winbtns">
+        <button class="winbtn" id="win-min" aria-label="Minimieren">
+          <svg width="12" height="12" viewBox="0 0 12 12"><line x1="2" y1="6.5" x2="10" y2="6.5" /></svg>
+        </button>
+        <button class="winbtn" id="win-max" aria-label="Maximieren">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="2.5" y="2.5" width="7" height="7" rx="1" /></svg>
+        </button>
+        <button class="winbtn close" id="win-close" aria-label="Schließen">
+          <svg width="12" height="12" viewBox="0 0 12 12"><line x1="2.7" y1="2.7" x2="9.3" y2="9.3" /><line x1="9.3" y1="2.7" x2="2.7" y2="9.3" /></svg>
+        </button>
+      </div>
     </header>
     <div id="term"></div>
+    <div id="resize-grips" aria-hidden="true">
+      <div class="grip n" data-dir="North"></div>
+      <div class="grip s" data-dir="South"></div>
+      <div class="grip w" data-dir="West"></div>
+      <div class="grip e" data-dir="East"></div>
+      <div class="grip nw" data-dir="NorthWest"></div>
+      <div class="grip ne" data-dir="NorthEast"></div>
+      <div class="grip sw" data-dir="SouthWest"></div>
+      <div class="grip se" data-dir="SouthEast"></div>
+    </div>
     <script type="module" src="/src/terminal.ts"></script>
   </body>
 </html>
