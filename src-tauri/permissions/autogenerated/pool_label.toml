@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pool-label"
+description = "Enables the pool_label command without any pre-configured scope."
+commands.allow = ["pool_label"]
+
+[[permission]]
+identifier = "deny-pool-label"
+description = "Denies the pool_label command without any pre-configured scope."
+commands.deny = ["pool_label"]

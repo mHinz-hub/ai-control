@@ -1,0 +1,492 @@
+/* Kachel- und Wiki-Ansichten des Panels (Befehls-History, Archiv-Suchtreffer,
+   Archiv-Wiki) — gemeinsam für das angedockte Panel (terminal.html) und das
+   abgelöste Fenster (panel.html); von beiden Entry-Points importiert. */
+
+#commands-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px;
+}
+#commands-content::-webkit-scrollbar {
+  width: 8px;
+}
+#commands-content::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+}
+.cmd-sep {
+  margin: 16px 0 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  color: var(--faint);
+  font:
+    500 11px/1 -apple-system,
+    system-ui,
+    sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.cmd-rec {
+  margin-bottom: 12px;
+}
+.cmd-rec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--faint);
+  font:
+    500 11px/1 -apple-system,
+    system-ui,
+    sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.cmd-all {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+.cmd-all:hover {
+  background: var(--line);
+  color: var(--text);
+}
+.cmd-all.copied {
+  color: var(--ok);
+}
+.cmd-del:hover {
+  color: var(--err);
+}
+.cmd-tile {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 6px 8px 10px;
+  margin-top: 6px;
+}
+.cmd-body {
+  flex: 1;
+  min-width: 0;
+}
+.cmd-text {
+  font-family: "JetBrains Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+.cmd-note {
+  margin-top: 4px;
+  color: var(--muted);
+  font:
+    400 11px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+}
+#search-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px;
+}
+.hit-search {
+  margin-bottom: 8px;
+}
+.hit-search input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--text);
+  font:
+    400 12px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+  outline: none;
+}
+.hit-search input:focus {
+  border-color: var(--line-strong);
+}
+.hit-search input::placeholder {
+  color: var(--faint);
+}
+#search-content::-webkit-scrollbar {
+  width: 8px;
+}
+#search-content::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+}
+.hit-head {
+  color: var(--faint);
+  font:
+    500 11px/1 -apple-system,
+    system-ui,
+    sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.hit-tile {
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-top: 6px;
+  cursor: pointer;
+}
+.hit-tile:hover {
+  border-color: var(--line-strong);
+}
+.hit-title {
+  font:
+    600 12px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.hit-snippet {
+  margin-top: 4px;
+  color: var(--muted);
+  font:
+    400 11px/1.5 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.hit-snippet mark {
+  background: transparent;
+  color: var(--warn);
+  font-weight: 600;
+}
+.hit-path {
+  margin-top: 4px;
+  color: var(--faint);
+  font-family: "JetBrains Mono", Menlo, monospace;
+  font-size: 10px;
+}
+
+/* Wiki-Ansicht: Übersichts-/Schlagwort-Seiten und Dokumente. */
+#wiki-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 16px;
+}
+#wiki-content::-webkit-scrollbar {
+  width: 8px;
+}
+#wiki-content::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+}
+.wiki-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.wiki-head-left {
+  min-width: 0;
+}
+.wiki-head-title {
+  color: var(--text);
+  font:
+    600 13px/1.3 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.wiki-head-sub {
+  margin-top: 2px;
+  color: var(--faint);
+  font-family: "JetBrains Mono", Menlo, monospace;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wiki-head-right {
+  color: var(--faint);
+  font:
+    500 11px/1 -apple-system,
+    system-ui,
+    sans-serif;
+  white-space: nowrap;
+}
+.wiki-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 10px 0 4px;
+}
+.wiki-chip {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font:
+    500 10.5px/1.5 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.wiki-chip:hover {
+  background: var(--line);
+  color: var(--text);
+}
+.wiki-chip.active {
+  background: var(--line);
+  border-color: var(--line-strong);
+  color: var(--accent);
+}
+.wiki-folder {
+  margin: 14px 0 2px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--faint);
+  font:
+    500 10px/1 -apple-system,
+    system-ui,
+    sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.wiki-doc {
+  padding: 7px 8px;
+  margin: 4px -8px 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.wiki-doc:hover {
+  background: var(--tile);
+}
+.wiki-doc-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.wiki-doc-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--accent);
+  font:
+    600 12px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.wiki-doc-date {
+  color: var(--faint);
+  font-family: "JetBrains Mono", Menlo, monospace;
+  font-size: 10px;
+}
+.wiki-doc-desc {
+  margin-top: 2px;
+  color: var(--muted);
+  font:
+    400 11px/1.5 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.wiki-doc-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+.wiki-empty {
+  margin-top: 18px;
+  color: var(--muted);
+  font:
+    400 12px/1.6 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.wiki-empty strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text);
+  font-weight: 600;
+}
+.wiki-doc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.wiki-back {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font:
+    500 11px/1 -apple-system,
+    system-ui,
+    sans-serif;
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+.wiki-back:hover {
+  background: var(--line);
+  color: var(--text);
+}
+.wiki-body {
+  font-size: 12.5px;
+  line-height: 1.55;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+.wiki-body h1,
+.wiki-body h2,
+.wiki-body h3 {
+  line-height: 1.25;
+  margin: 1em 0 0.4em;
+}
+.wiki-body h1 {
+  font-size: 1.4em;
+}
+.wiki-body h2 {
+  font-size: 1.2em;
+}
+.wiki-body h3 {
+  font-size: 1.05em;
+}
+.wiki-body :first-child {
+  margin-top: 0;
+}
+.wiki-body p,
+.wiki-body ul,
+.wiki-body ol,
+.wiki-body pre,
+.wiki-body blockquote {
+  margin: 0 0 0.7em;
+}
+.wiki-body code {
+  font-family: "JetBrains Mono", Menlo, monospace;
+  font-size: 0.9em;
+  background: var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.wiki-body pre {
+  background: var(--tile);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow: auto;
+}
+.wiki-body pre code {
+  background: none;
+  padding: 0;
+}
+.wiki-body blockquote {
+  border-left: 3px solid var(--line);
+  padding-left: 12px;
+  color: var(--muted);
+}
+.wiki-body a {
+  color: var(--accent);
+}
+.wiki-backlinks {
+  margin-top: 14px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  color: var(--faint);
+  font:
+    500 11px/1.6 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.wiki-backlinks a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+/* Backlink-Zähler in der Dokumentzeile. */
+.wiki-doc-back {
+  color: var(--faint);
+  font:
+    500 10px/1 -apple-system,
+    system-ui,
+    sans-serif;
+  white-space: nowrap;
+}
+
+/* Archiv-Formular: klappt unter dem Archiv-Button auf. */
+.archive-form {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 260px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+.archive-form[hidden] {
+  display: none;
+}
+.archive-form input {
+  box-sizing: border-box;
+  width: 100%;
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--text);
+  font:
+    400 12px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+  outline: none;
+}
+.archive-form input:focus {
+  border-color: var(--line-strong);
+}
+.archive-form input::placeholder {
+  color: var(--faint);
+}
+.archive-form-submit {
+  border: none;
+  background: var(--line);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font:
+    500 12px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.archive-form-submit:hover {
+  background: var(--line-strong);
+}
+
+/* Sichtbare Fehlermeldung (panelToast), oben rechts über dem Panel-Inhalt. */
+.panel-toast {
+  position: fixed;
+  top: 44px;
+  right: 12px;
+  z-index: 10;
+  max-width: 320px;
+  background: var(--tile);
+  border: 1px solid var(--err);
+  color: var(--err);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font:
+    500 11px/1.5 -apple-system,
+    system-ui,
+    sans-serif;
+}

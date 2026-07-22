@@ -113,7 +113,8 @@ function cost(n: number): string {
 
   <p v-if="error" class="error">{{ error }}</p>
 
-  <table v-if="groups.length" class="grid">
+  <div v-if="groups.length" class="list-scroll">
+  <table class="grid">
     <colgroup>
       <col />
       <col class="col-num" />
@@ -164,5 +165,6 @@ function cost(n: number): string {
       </tr>
     </tfoot>
   </table>
+  </div>
   <p v-else-if="!loading" class="empty">{{ $t("usage.empty") }}</p>
 </template>

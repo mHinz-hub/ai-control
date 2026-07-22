@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
 interface Project {
+  id: string;
   name: string;
   path: string;
   pool: string | null;
@@ -44,7 +45,7 @@ const error = ref("");
 const icons = ref<Record<string, string>>({});
 
 function iconKey(p: Project): string | null {
-  return p.terminal.icon ? `${p.name}:${p.terminal.icon}` : null;
+  return p.terminal.icon ? `${p.id}:${p.terminal.icon}` : null;
 }
 
 function projIcon(p: Project): string | undefined {
@@ -58,7 +59,7 @@ async function loadIcons() {
     if (!key || key in icons.value) continue;
     try {
       const data = await invoke<string | null>("project_icon", {
-        project: p.name,
+        project: p.id,
       });
       icons.value[key] = data ?? "";
     } catch (e) {
@@ -81,7 +82,7 @@ async function refresh() {
 
 async function stop(project: Project) {
   try {
-    await invoke("stop_project", { project: project.name });
+    await invoke("stop_project", { project: project.id });
     await refresh();
   } catch (e) {
     error.value = String(e);
@@ -90,7 +91,7 @@ async function stop(project: Project) {
 
 async function openTerminal(project: Project) {
   try {
-    await invoke("open_terminal", { project: project.name });
+    await invoke("open_terminal", { project: project.id });
     await refresh();
   } catch (e) {
     error.value = String(e);
@@ -98,6 +99,7 @@ async function openTerminal(project: Project) {
 }
 
 interface PendingRestart {
+  id: string;
   name: string;
   from: string | null;
   to: string;
@@ -110,9 +112,9 @@ async function assign(project: Project, event: Event) {
   const pool = (event.target as HTMLSelectElement).value;
   const from = project.pool;
   try {
-    await invoke("assign_pool", { project: project.name, pool });
+    await invoke("assign_pool", { project: project.id, pool });
     if (project.running && pool !== from) {
-      pending.value = { name: project.name, from, to: pool };
+      pending.value = { id: project.id, name: project.name, from, to: pool };
     }
     await refresh();
   } catch (e) {
@@ -124,7 +126,7 @@ async function restartNow() {
   const p = pending.value!;
   restarting.value = true;
   try {
-    await invoke("restart_project", { project: p.name });
+    await invoke("restart_project", { project: p.id });
     pending.value = null;
     await refresh();
   } catch (e) {
@@ -150,7 +152,13 @@ const THEME_NAMES: [string, string][] = [
   ["one-light", "One Light"],
 ];
 
+// Anzeige: Home-Anteil ~-kontrahiert; der volle Pfad steht im Hover-Pop.
+function contractHome(p: string): string {
+  return p.replace(/^\/(?:home|Users)\/[^/]+/, "~");
+}
+
 interface TerminalSettings {
+  id: string;
   name: string;
   path: string;
   theme: string;
@@ -158,17 +166,22 @@ interface TerminalSettings {
   title: string;
   todo: boolean;
   workDirs: string[];
+  archiveHome: string | null;
 }
 
 const settings = ref<TerminalSettings | null>(null);
 
 async function openSettings(p: Project) {
   try {
-    const todo = await invoke<boolean>("todo_state", { project: p.name });
+    const todo = await invoke<boolean>("todo_state", { project: p.id });
     const workDirs = await invoke<string[]>("project_work_dirs", {
-      project: p.name,
+      project: p.id,
+    });
+    const archiveHome = await invoke<string | null>("panel_archive_dir_cmd", {
+      project: p.id,
     });
     settings.value = {
+      id: p.id,
       name: p.name,
       path: p.path,
       theme: p.terminal.theme ?? "mocha",
@@ -176,6 +189,7 @@ async function openSettings(p: Project) {
       title: p.terminal.title ?? "",
       todo,
       workDirs,
+      archiveHome,
     };
   } catch (e) {
     error.value = String(e);
@@ -189,9 +203,9 @@ async function changeProjectDir() {
   const dir = await open({ directory: true, multiple: false });
   if (typeof dir !== "string") return;
   try {
-    await invoke("set_project_dir", { project: s.name, dir });
+    await invoke("set_project_dir", { project: s.id, dir });
     await refresh();
-    const p = projects.value.find((x) => x.name === s.name);
+    const p = projects.value.find((x) => x.id === s.id);
     if (p) s.path = p.path;
   } catch (e) {
     error.value = String(e);
@@ -205,8 +219,8 @@ async function addWorkDir() {
   const dir = await open({ directory: true, multiple: false });
   if (typeof dir !== "string") return;
   try {
-    await invoke("add_work_dir", { project: s.name, dir });
-    s.workDirs = await invoke<string[]>("project_work_dirs", { project: s.name });
+    await invoke("add_work_dir", { project: s.id, dir });
+    s.workDirs = await invoke<string[]>("project_work_dirs", { project: s.id });
   } catch (e) {
     error.value = String(e);
   }
@@ -215,8 +229,61 @@ async function addWorkDir() {
 async function removeWorkDir(dir: string) {
   const s = settings.value!;
   try {
-    await invoke("remove_work_dir", { project: s.name, dir });
-    s.workDirs = await invoke<string[]>("project_work_dirs", { project: s.name });
+    await invoke("remove_work_dir", { project: s.id, dir });
+    s.workDirs = await invoke<string[]>("project_work_dirs", { project: s.id });
+  } catch (e) {
+    error.value = String(e);
+  }
+}
+
+// Archiv-Home schreibt wie die Arbeitsordner direkt (Config + Permissions);
+// ohne Archiv zeigt das Panel nur Befehle und Dokument. Greift ab dem
+// nächsten Session-Start. Ist schon eins gesetzt, fragt ein Dialog nach —
+// mit der Option, die Dokumente mitzunehmen (nichts wird implizit verschoben).
+interface PendingArchiveChange {
+  dir: string;
+  migrate: boolean;
+}
+const pendingArchive = ref<PendingArchiveChange | null>(null);
+
+async function chooseArchive() {
+  const s = settings.value!;
+  const dir = await open({ directory: true, multiple: false });
+  if (typeof dir !== "string") return;
+  if (s.archiveHome && s.archiveHome !== dir) {
+    pendingArchive.value = { dir, migrate: false };
+    return;
+  }
+  try {
+    await invoke("set_archive_home_cmd", { project: s.id, dir });
+    s.archiveHome = await invoke<string | null>("panel_archive_dir_cmd", {
+      project: s.id,
+    });
+  } catch (e) {
+    error.value = String(e);
+  }
+}
+
+async function confirmArchiveChange() {
+  const s = settings.value!;
+  const a = pendingArchive.value!;
+  try {
+    await invoke("change_archive_home_cmd", { project: s.id, dir: a.dir, migrate: a.migrate });
+    s.archiveHome = await invoke<string | null>("panel_archive_dir_cmd", {
+      project: s.id,
+    });
+    pendingArchive.value = null;
+  } catch (e) {
+    error.value = String(e);
+    pendingArchive.value = null;
+  }
+}
+
+async function clearArchive() {
+  const s = settings.value!;
+  try {
+    await invoke("clear_archive_home_cmd", { project: s.id });
+    s.archiveHome = null;
   } catch (e) {
     error.value = String(e);
   }
@@ -226,7 +293,7 @@ async function pickIcon() {
   const file = await open({
     multiple: false,
     directory: false,
-    filters: [{ name: "Icon", extensions: ["png", "icns"] }],
+    filters: [{ name: "Icon", extensions: ["png", "svg"] }],
   });
   if (typeof file === "string") settings.value!.icon = file;
 }
@@ -236,12 +303,12 @@ async function saveSettings() {
   try {
     const title = s.title.trim();
     await invoke("set_terminal_config", {
-      project: s.name,
+      project: s.id,
       theme: s.theme === "mocha" ? null : s.theme,
       icon: s.icon,
       title: title === "" ? null : title,
     });
-    await invoke("set_todo", { project: s.name, enabled: s.todo });
+    await invoke("set_todo", { project: s.id, enabled: s.todo });
     settings.value = null;
     await refresh();
   } catch (e) {
@@ -338,9 +405,25 @@ async function createProject() {
   }
 }
 
-interface PendingDelete {
+interface DeletePreview {
   name: string;
+  projectDir: string;
+  aiControlDir: boolean;
+  archivePermission: boolean;
+  todoHook: boolean;
+  panelFiles: number;
+  archiveHome: string | null;
+  archiveDocs: number;
   workDirs: string[];
+}
+
+// Eskalationsleiter: jede Stufe schließt die vorige ein.
+type DeleteScope = "integration" | "archive" | "full";
+
+interface PendingDelete {
+  id: string;
+  preview: DeletePreview;
+  scope: DeleteScope;
   deleteWorkDirs: boolean;
 }
 
@@ -349,10 +432,8 @@ const pendingDelete = ref<PendingDelete | null>(null);
 async function askDelete(p: Project) {
   error.value = "";
   try {
-    const workDirs = await invoke<string[]>("project_work_dirs", {
-      project: p.name,
-    });
-    pendingDelete.value = { name: p.name, workDirs, deleteWorkDirs: false };
+    const preview = await invoke<DeletePreview>("delete_preview", { project: p.id });
+    pendingDelete.value = { id: p.id, preview, scope: "integration", deleteWorkDirs: false };
   } catch (e) {
     error.value = String(e);
   }
@@ -361,23 +442,11 @@ async function askDelete(p: Project) {
 async function confirmDelete() {
   const d = pendingDelete.value!;
   try {
-    await invoke("delete_project", {
-      name: d.name,
-      deleteWorkDirs: d.deleteWorkDirs,
+    await invoke("delete_project_scoped", {
+      project: d.id,
+      scope: d.scope,
+      deleteWorkDirs: d.scope === "full" && d.deleteWorkDirs,
     });
-    pendingDelete.value = null;
-    await refresh();
-  } catch (e) {
-    error.value = String(e);
-    pendingDelete.value = null;
-  }
-}
-
-// Nur den Registry-Eintrag entfernen; der Ordner bleibt.
-async function unlinkProject() {
-  const d = pendingDelete.value!;
-  try {
-    await invoke("remove_project", { name: d.name });
     pendingDelete.value = null;
     await refresh();
   } catch (e) {
@@ -405,6 +474,7 @@ onUnmounted(() => window.clearInterval(timer));
   </div>
 
   <p v-if="error" class="error">{{ error }}</p>
+  <div class="list-scroll">
   <table class="grid">
     <colgroup>
       <col class="col-dot" />
@@ -421,7 +491,7 @@ onUnmounted(() => window.clearInterval(timer));
       </tr>
     </thead>
     <tbody>
-      <tr v-for="p in projects" :key="p.name">
+      <tr v-for="p in projects" :key="p.id">
         <td class="cell-dot">
           <span class="dot" :class="{ on: p.running }"></span>
         </td>
@@ -474,6 +544,7 @@ onUnmounted(() => window.clearInterval(timer));
       </tr>
     </tbody>
   </table>
+  </div>
 
   <div v-if="wizard" class="overlay" @click.self="wizard = null">
     <form class="dialog" @submit.prevent="createProject">
@@ -577,90 +648,216 @@ onUnmounted(() => window.clearInterval(timer));
 
   <div v-if="pendingDelete" class="overlay" @click.self="pendingDelete = null">
     <div class="dialog">
-      <h3>{{ $t("projects.deleteTitle", { name: pendingDelete.name }) }}</h3>
-      <p class="hint">{{ $t("projects.deleteWarning", { name: pendingDelete.name }) }}</p>
-      <template v-if="pendingDelete.workDirs.length">
-        <label class="checkline">
-          <input v-model="pendingDelete.deleteWorkDirs" type="checkbox" />
-          {{ $t("projects.deleteWorkDirs") }}
-        </label>
-        <ul class="affected">
-          <li v-for="wd in pendingDelete.workDirs" :key="wd">{{ wd }}</li>
-        </ul>
-        <p v-if="!pendingDelete.deleteWorkDirs" class="hint">
-          {{ $t("projects.workDirsStay") }}
-        </p>
-      </template>
-      <p class="hint">{{ $t("projects.unlinkHint") }}</p>
+      <h3>{{ $t("projects.deleteTitle", { name: pendingDelete.preview.name }) }}</h3>
+
+      <label class="scope">
+        <input v-model="pendingDelete.scope" type="radio" value="integration" />
+        <span>
+          <strong>{{ $t("projects.scopeIntegration") }}</strong>
+          <small>{{ $t("projects.scopeIntegrationDesc") }}</small>
+        </span>
+      </label>
+      <label class="scope">
+        <input
+          v-model="pendingDelete.scope"
+          type="radio"
+          value="archive"
+          :disabled="!pendingDelete.preview.archiveHome"
+        />
+        <span>
+          <strong>{{ $t("projects.scopeArchive") }}</strong>
+          <small v-if="pendingDelete.preview.archiveHome">
+            {{ $t("projects.scopeArchiveDesc", { path: pendingDelete.preview.archiveHome }) }}
+            ({{ $t("projects.docCount", pendingDelete.preview.archiveDocs) }})
+          </small>
+          <small v-else>{{ $t("projects.archiveNone") }}</small>
+        </span>
+      </label>
+      <label class="scope">
+        <input v-model="pendingDelete.scope" type="radio" value="full" />
+        <span>
+          <strong>{{ $t("projects.scopeFull") }}</strong>
+          <small>{{ $t("projects.scopeFullDesc", { path: pendingDelete.preview.projectDir }) }}</small>
+        </span>
+      </label>
+      <label
+        v-if="pendingDelete.scope === 'full' && pendingDelete.preview.workDirs.length"
+        class="checkline"
+      >
+        <input v-model="pendingDelete.deleteWorkDirs" type="checkbox" />
+        {{ $t("projects.deleteWorkDirs") }}
+      </label>
+
+      <p class="hint">{{ $t("projects.deletePreviewTitle") }}</p>
+      <ul class="affected">
+        <li>{{ $t("projects.artRegistry") }}</li>
+        <li v-if="pendingDelete.preview.aiControlDir">{{ $t("projects.artAiControl") }}</li>
+        <li v-if="pendingDelete.preview.archivePermission">{{ $t("projects.artArchivePerm") }}</li>
+        <li v-if="pendingDelete.preview.todoHook">{{ $t("projects.artTodoHook") }}</li>
+        <li v-if="pendingDelete.preview.panelFiles">
+          {{ $t("projects.artPanelFiles", pendingDelete.preview.panelFiles) }}
+        </li>
+        <li>{{ $t("projects.artDesktop") }}</li>
+        <li v-if="pendingDelete.scope !== 'integration' && pendingDelete.preview.archiveHome">
+          {{ $t("projects.artArchive", { path: pendingDelete.preview.archiveHome }) }}
+          ({{ $t("projects.docCount", pendingDelete.preview.archiveDocs) }})
+        </li>
+        <li v-if="pendingDelete.scope === 'full'">
+          {{ $t("projects.artProjectDir", { path: pendingDelete.preview.projectDir }) }}
+        </li>
+        <template v-if="pendingDelete.scope === 'full' && pendingDelete.deleteWorkDirs">
+          <li v-for="wd in pendingDelete.preview.workDirs" :key="wd">
+            {{ $t("projects.artWorkDir", { path: wd }) }}
+          </li>
+        </template>
+      </ul>
+
       <div class="actions">
         <button type="button" @click="pendingDelete = null">
           {{ $t("projects.cancel") }}
         </button>
-        <button @click="unlinkProject">
-          {{ $t("projects.unlink") }}
-        </button>
         <button class="danger" @click="confirmDelete">
-          {{ $t("projects.delete") }}
+          {{ $t("projects.deleteConfirm") }}
         </button>
       </div>
     </div>
   </div>
 
   <div v-if="settings" class="overlay">
-    <div class="dialog">
+    <div class="dialog settings-dialog">
+      <button class="close" :title="$t('projects.cancel')" @click="settings = null">✕</button>
       <h3>{{ $t("projects.terminal", { name: settings.name }) }}</h3>
-      <label class="field">
-        {{ $t("projects.title") }}
-        <input v-model="settings.title" :placeholder="settings.name" />
-      </label>
-      <label class="field">
-        {{ $t("projects.theme") }}
-        <select v-model="settings.theme">
-          <option v-for="[value, label] in THEME_NAMES" :key="value" :value="value">
-            {{ label }}
-          </option>
-        </select>
-      </label>
-      <label class="field">
-        {{ $t("projects.dockIcon") }}
-        <span class="icon-row">
-          <button @click="pickIcon">{{ $t("projects.chooseFile") }}</button>
-          <button v-if="settings.icon" @click="settings.icon = null">
-            {{ $t("projects.remove") }}
-          </button>
-          <span v-if="settings.icon" class="icon-path hover-pop">
-            {{ settings.icon.split("/").pop() }}
-            <span class="pop pop-path">{{ settings.icon }}</span>
+
+      <div class="sbody">
+      <section class="sgroup">
+        <h4 class="eyebrow">{{ $t("projects.groupAppearance") }}</h4>
+        <label class="srow">
+          <span class="slbl">{{ $t("projects.title") }}</span>
+          <span class="sval">
+            <input v-model="settings.title" :placeholder="settings.name" />
           </span>
-          <span v-else class="icon-path">{{ $t("projects.defaultIcon") }}</span>
-        </span>
-      </label>
-      <label class="field field-top">
-        {{ $t("projects.workDir") }}
-        <span class="workdirs">
-          <span class="icon-row">
-            <span class="icon-path">{{ settings.path }}</span>
+          <span class="sacts"></span>
+        </label>
+        <label class="srow">
+          <span class="slbl">{{ $t("projects.theme") }}</span>
+          <span class="sval">
+            <select v-model="settings.theme">
+              <option v-for="[value, label] in THEME_NAMES" :key="value" :value="value">
+                {{ label }}
+              </option>
+            </select>
+          </span>
+          <span class="sacts"></span>
+        </label>
+        <div class="srow">
+          <span class="slbl">{{ $t("projects.dockIcon") }}</span>
+          <span class="sval">
+            <span v-if="settings.icon" class="spath hover-pop">
+              {{ settings.icon.split("/").pop() }}
+              <span class="pop pop-path">{{ settings.icon }}</span>
+            </span>
+            <span v-else class="spath muted">{{ $t("projects.defaultIcon") }}</span>
+          </span>
+          <span class="sacts">
+            <button @click="pickIcon">{{ $t("projects.chooseFile") }}</button>
+            <button v-if="settings.icon" @click="settings.icon = null">
+              {{ $t("projects.remove") }}
+            </button>
+          </span>
+        </div>
+        <p class="ghint">{{ $t("projects.appliesNextStart") }}</p>
+      </section>
+
+      <section class="sgroup instant">
+        <h4 class="eyebrow">{{ $t("projects.groupFolders") }}</h4>
+        <div class="srow">
+          <span class="slbl">{{ $t("projects.projectDir") }}</span>
+          <span class="sval">
+            <span class="spath hover-pop">
+              {{ contractHome(settings.path) }}
+              <span class="pop pop-path">{{ settings.path }}</span>
+            </span>
+          </span>
+          <span class="sacts">
             <button @click="changeProjectDir">{{ $t("projects.changeDir") }}</button>
           </span>
-          <span v-for="wd in settings.workDirs" :key="wd" class="icon-row">
-            <span class="icon-path">{{ wd }}</span>
+        </div>
+        <div v-for="(wd, i) in settings.workDirs" :key="wd" class="srow">
+          <span class="slbl">{{ i === 0 ? $t("projects.workDir") : "" }}</span>
+          <span class="sval">
+            <span class="spath hover-pop">
+              {{ contractHome(wd) }}
+              <span class="pop pop-path">{{ wd }}</span>
+            </span>
+          </span>
+          <span class="sacts">
             <button @click="removeWorkDir(wd)">{{ $t("projects.remove") }}</button>
           </span>
-          <button @click="addWorkDir">{{ $t("projects.addWorkDir") }}</button>
-        </span>
-      </label>
-      <label class="field">
-        {{ $t("projects.todo") }}
-        <span class="checkline">
+        </div>
+        <div class="srow">
+          <span class="slbl">{{ settings.workDirs.length ? "" : $t("projects.workDir") }}</span>
+          <span class="sval"></span>
+          <span class="sacts">
+            <button @click="addWorkDir">{{ $t("projects.addWorkDir") }}</button>
+          </span>
+        </div>
+        <div class="srow">
+          <span class="slbl">{{ $t("projects.archive") }}</span>
+          <span class="sval">
+            <span v-if="settings.archiveHome" class="spath hover-pop">
+              {{ contractHome(settings.archiveHome) }}
+              <span class="pop pop-path">{{ settings.archiveHome }}</span>
+            </span>
+            <span v-else class="spath muted">{{ $t("projects.archiveNone") }}</span>
+          </span>
+          <span class="sacts">
+            <button @click="chooseArchive">{{ $t("projects.changeDir") }}</button>
+            <button v-if="settings.archiveHome" @click="clearArchive">
+              {{ $t("projects.remove") }}
+            </button>
+          </span>
+        </div>
+        <p class="ghint">{{ $t("projects.writesImmediately") }}</p>
+      </section>
+
+      <section class="sgroup">
+        <h4 class="eyebrow">{{ $t("projects.groupSession") }}</h4>
+        <label class="checkline todo-line">
           <input v-model="settings.todo" type="checkbox" />
-          {{ $t("projects.todoDesc") }}
-        </span>
-      </label>
-      <p class="hint">{{ $t("projects.appliesNextStart") }}</p>
+          <span>{{ $t("projects.todo") }} — {{ $t("projects.todoDesc") }}</span>
+        </label>
+      </section>
+      </div>
+
       <div class="actions">
         <button @click="settings = null">{{ $t("projects.cancel") }}</button>
         <button class="primary" @click="saveSettings">
           {{ $t("projects.save") }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="pendingArchive && settings" class="overlay" @click.self="pendingArchive = null">
+    <div class="dialog">
+      <h3>{{ $t("projects.archiveChangeTitle") }}</h3>
+      <p>
+        {{ $t("projects.archiveChangeText", {
+          old: contractHome(settings.archiveHome ?? ""),
+          neu: contractHome(pendingArchive.dir),
+        }) }}
+      </p>
+      <label class="checkline">
+        <input v-model="pendingArchive.migrate" type="checkbox" />
+        {{ $t("projects.archiveMigrate") }}
+      </label>
+      <p class="hint">{{ $t("projects.archiveMigrateHint") }}</p>
+      <div class="actions">
+        <button type="button" @click="pendingArchive = null">
+          {{ $t("projects.cancel") }}
+        </button>
+        <button class="primary" @click="confirmArchiveChange">
+          {{ $t("projects.archiveChangeConfirm") }}
         </button>
       </div>
     </div>
@@ -685,3 +882,167 @@ onUnmounted(() => window.clearInterval(timer));
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Lösch-Dialog: drei Stufen als Radio-Zeilen mit Beschreibung. */
+.scope {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  cursor: pointer;
+}
+
+.scope input {
+  margin-top: 0.2rem;
+}
+
+.scope span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.scope strong {
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.scope small {
+  color: var(--overlay);
+  font-size: 0.78rem;
+}
+
+.scope:has(input:disabled) {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Settings-Dialog: festes Grid Label | Wert | Aktionen in drei Gruppen. */
+.settings-dialog {
+  position: relative;
+  width: min(48rem, 94vw);
+  max-width: none;
+  /* Feste, großzügige Höhe — Kopf und Aktionszeile stehen, nur der
+     Mittelteil (.sbody) scrollt, wenn er nicht passt. */
+  height: min(60rem, 94vh);
+  overflow: hidden;
+  gap: 0.7rem;
+  border-color: var(--surface2);
+}
+
+.sbody {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  margin: 0 -0.5rem;
+  padding: 0 0.5rem;
+}
+
+/* Aktions-Buttons gleich breit — ruhige Aktionsspalte; das Schließen-Kreuz
+   ist davon ausgenommen. */
+.settings-dialog .sacts button,
+.settings-dialog .actions button {
+  width: 10.5rem;
+}
+
+.settings-dialog .close {
+  position: absolute;
+  top: 0.7rem;
+  right: 0.7rem;
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  line-height: 1;
+  color: var(--overlay);
+  background: none;
+  border: none;
+}
+
+.settings-dialog .close:hover {
+  color: var(--text);
+}
+
+.sgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.7rem 0.9rem;
+}
+
+/* Sofort-Schreiber (Ordner/Archiv) als abgesetzte Fläche — hier gibt es
+   keinen Speichern-Schritt, der Rest des Dialogs speichert erst am Ende. */
+.sgroup.instant {
+  background: var(--crust);
+  border: 1px solid var(--surface0);
+  border-radius: 9px;
+}
+
+.eyebrow {
+  margin: 0 0 0.15rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--overlay);
+}
+
+.srow {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 1.9rem;
+  color: var(--subtext);
+  font-size: 0.85rem;
+}
+
+.sval {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.sval input,
+.sval select {
+  width: 100%;
+}
+
+.sacts {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
+/* Todo-Zeile: volle Dialogbreite, der Text wird nie gekürzt. */
+.todo-line {
+  font-size: 0.85rem;
+  color: var(--subtext);
+}
+
+.spath {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--subtext);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.spath.muted {
+  color: var(--overlay);
+}
+
+.ghint {
+  margin: 0.1rem 0 0;
+  font-size: 0.75rem;
+  color: var(--overlay);
+}
+
+.settings-dialog .actions {
+  margin-top: 0.25rem;
+}
+</style>

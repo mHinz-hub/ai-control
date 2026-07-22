@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-wiki-open"
+description = "Enables the wiki_open command without any pre-configured scope."
+commands.allow = ["wiki_open"]
+
+[[permission]]
+identifier = "deny-wiki-open"
+description = "Denies the wiki_open command without any pre-configured scope."
+commands.deny = ["wiki_open"]

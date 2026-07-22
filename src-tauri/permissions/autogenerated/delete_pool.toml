@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-delete-pool"
+description = "Enables the delete_pool command without any pre-configured scope."
+commands.allow = ["delete_pool"]
+
+[[permission]]
+identifier = "deny-delete-pool"
+description = "Denies the delete_pool command without any pre-configured scope."
+commands.deny = ["delete_pool"]

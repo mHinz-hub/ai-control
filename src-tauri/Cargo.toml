@@ -1,6 +1,6 @@
 [package]
 name = "ai-control"
-version = "0.2.0"
+version = "0.3.0"
 description = "Pool- und Session-Verwaltung für Claude Code"
 authors = ["marcus.hinz"]
 license = "MIT"
@@ -14,6 +14,10 @@ rust-version = "1.77.2"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# Zeilennummern im Release-Backtrace (sonst zeigt der Panic-Tracer nur Adressen).
+[profile.release]
+debug = 1
+
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
 
@@ -25,17 +29,26 @@ tauri = { version = "2.11.3", features = ["macos-private-api", "tray-icon", "ima
 tauri-plugin-log = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-clipboard-manager = "2"
 base64 = "0.22"
 sha2 = "0.10"
 portable-pty = "0.9"
 uuid = { version = "1", features = ["v4"] }
+# Volltext-Suche übers Panel-Archiv (SQLite FTS5, in-memory aus dem Baum gebaut).
+rusqlite = { version = "0.32", features = ["bundled"] }
 keyring = { version = "3", features = ["apple-native", "sync-secret-service", "windows-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = "5"
 glib = "0.18"
+gtk = "0.18"
+rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
+ksni = "0.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Der Installations-Dialog läuft vor dem Tauri-Setup, also ohne AppHandle und
+# damit ohne das Dialog-Plugin. Unter macOS braucht rfd kein Backend-Feature.
+rfd = { version = "0.15", default-features = false }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage", "NSResponder", "NSRunningApplication"] }
 objc2-foundation = { version = "0.3", features = ["NSString"] }

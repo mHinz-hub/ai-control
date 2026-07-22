@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "ai-control",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "identifier": "com.aicontrol.app",
   "build": {
     "frontendDist": "../dist",
@@ -13,12 +13,13 @@
     "macOSPrivateApi": true,
     "windows": [],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost ws://localhost:1420 http://localhost:1420"
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["deb", "rpm", "appimage", "app", "dmg", "nsis", "msi"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -26,6 +27,30 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/share/gnome-shell/extensions/ai-control-popup@local/extension.js": "../gnome-shell-extension/ai-control-popup@local/extension.js",
+          "/usr/share/gnome-shell/extensions/ai-control-popup@local/metadata.json": "../gnome-shell-extension/ai-control-popup@local/metadata.json",
+          "/usr/share/gnome-shell/extensions/ai-control-popup@local/trayLinux.png": "icons/trayLinux.png",
+          "/usr/share/cinnamon/extensions/ai-control-popup@local/extension.js": "../cinnamon-extension/ai-control-popup@local/extension.js",
+          "/usr/share/cinnamon/extensions/ai-control-popup@local/metadata.json": "../cinnamon-extension/ai-control-popup@local/metadata.json",
+          "/usr/share/kwin/scripts/ai-control-popup/metadata.json": "../kwin-script/ai-control-popup/metadata.json",
+          "/usr/share/kwin/scripts/ai-control-popup/contents/code/main.js": "../kwin-script/ai-control-popup/contents/code/main.js"
+        }
+      },
+      "rpm": {
+        "files": {
+          "/usr/share/gnome-shell/extensions/ai-control-popup@local/extension.js": "../gnome-shell-extension/ai-control-popup@local/extension.js",
+          "/usr/share/gnome-shell/extensions/ai-control-popup@local/metadata.json": "../gnome-shell-extension/ai-control-popup@local/metadata.json",
+          "/usr/share/gnome-shell/extensions/ai-control-popup@local/trayLinux.png": "icons/trayLinux.png",
+          "/usr/share/cinnamon/extensions/ai-control-popup@local/extension.js": "../cinnamon-extension/ai-control-popup@local/extension.js",
+          "/usr/share/cinnamon/extensions/ai-control-popup@local/metadata.json": "../cinnamon-extension/ai-control-popup@local/metadata.json",
+          "/usr/share/kwin/scripts/ai-control-popup/metadata.json": "../kwin-script/ai-control-popup/metadata.json",
+          "/usr/share/kwin/scripts/ai-control-popup/contents/code/main.js": "../kwin-script/ai-control-popup/contents/code/main.js"
+        }
+      }
+    },
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }

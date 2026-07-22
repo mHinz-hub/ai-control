@@ -51,7 +51,7 @@ async function toggleAutostart() {
 
 <template>
   <header data-tauri-drag-region>
-    <h1 data-tauri-drag-region>ai-control</h1>
+    <h1 data-tauri-drag-region>aICentral</h1>
     <nav>
       <button :class="{ active: tab === 'projects' }" @click="tab = 'projects'">
         {{ $t("app.projects") }}

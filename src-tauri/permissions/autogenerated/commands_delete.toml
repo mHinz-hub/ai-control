@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-commands-delete"
+description = "Enables the commands_delete command without any pre-configured scope."
+commands.allow = ["commands_delete"]
+
+[[permission]]
+identifier = "deny-commands-delete"
+description = "Denies the commands_delete command without any pre-configured scope."
+commands.deny = ["commands_delete"]

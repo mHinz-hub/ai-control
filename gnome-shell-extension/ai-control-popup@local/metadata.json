@@ -1,0 +1,7 @@
+{
+  "uuid": "ai-control-popup@local",
+  "name": "ai-control Popup",
+  "description": "Panel-Button; relayt den Klick per D-Bus an die ai-control-App und schiebt deren Popup-Fenster unter den Button.",
+  "shell-version": ["48", "49", "50"],
+  "version": 1
+}

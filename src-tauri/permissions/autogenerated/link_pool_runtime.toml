@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-link-pool-runtime"
+description = "Enables the link_pool_runtime command without any pre-configured scope."
+commands.allow = ["link_pool_runtime"]
+
+[[permission]]
+identifier = "deny-link-pool-runtime"
+description = "Denies the link_pool_runtime command without any pre-configured scope."
+commands.deny = ["link_pool_runtime"]

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <title data-i18n="panel.windowDocument">Dokument</title>
+  </head>
+  <body>
+    <div class="panel-topbar" data-tauri-drag-region>
+      <div class="panel-tabs" id="panel-tabs">
+        <button class="panel-btn" data-mode="commands" data-i18n-title="panel.tabCommandsTitle" data-i18n="panel.tabCommands">Befehle</button>
+        <span class="tab-sep"></span>
+        <button class="panel-btn" data-mode="draft" data-i18n-title="panel.tabDraftTitle" data-i18n="panel.tabDraft">Dokument</button>
+        <button class="panel-btn" data-mode="wiki" data-i18n-title="panel.tabWikiTitle" data-i18n="panel.tabWiki">Wiki</button>
+        <button class="panel-btn" data-mode="search" data-i18n-title="panel.tabSearchTitle" data-i18n="panel.tabSearch">Suche</button>
+        <span class="tab-sep"></span>
+      </div>
+      <button class="winbtn" id="panel-dock" data-i18n-title="panel.dock">
+        <svg width="14" height="14" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" /><path d="M9.5 2.5v11" /><path d="M4 8h3.4M6 6.2 7.8 8 6 9.8" /></svg>
+      </button>
+      <button class="winbtn osctl" id="win-min" data-i18n-aria="panel.minimize">
+        <svg width="12" height="12" viewBox="0 0 12 12"><line x1="2" y1="6.5" x2="10" y2="6.5" /></svg>
+      </button>
+      <button class="winbtn osctl" id="win-max" data-i18n-aria="panel.maximize">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="2.5" y="2.5" width="7" height="7" rx="1" /></svg>
+      </button>
+      <button class="winbtn close" id="panel-close" data-i18n-title="panel.closePanel">
+        <svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" /></svg>
+      </button>
+    </div>
+    <div class="panel-head">
+      <div class="panel-titlerow" data-tauri-drag-region>
+        <span class="panel-title" data-i18n="panel.tabDraft">Dokument</span>
+        <button class="panel-btn panel-edit draft-only" id="panel-title-edit" data-i18n-title="panel.editTitle">✎</button>
+      </div>
+      <div class="panel-actions">
+        <select class="panel-lang draft-only" id="panel-lang" data-i18n-title="panel.spellcheckLang">
+          <option value="de">DE</option>
+          <option value="en">EN</option>
+          <option value="en-GB">EN-GB</option>
+          <option value="fr">FR</option>
+          <option value="es">ES</option>
+          <option value="it">IT</option>
+          <option value="nl">NL</option>
+        </select>
+        <button class="panel-btn draft-only" id="panel-wiki-jump" data-i18n-title="panel.openInWiki">
+          <svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 3.5C6.6 2.4 4.6 2 2.5 2v11c2.1 0 4.1.4 5.5 1.5 1.4-1.1 3.4-1.5 5.5-1.5V2c-2.1 0-4.1.4-5.5 1.5z" /><path d="M8 3.5v11" /></svg>
+        </button>
+        <button class="panel-btn draft-only" id="panel-mode" data-i18n-title="panel.toggleRaw" data-i18n="panel.rendered">MD</button>
+        <button class="panel-btn draft-only" id="panel-content-edit" data-i18n-title="panel.editDraft">
+          <svg width="14" height="14" viewBox="0 0 16 16"><path d="M10.8 2.6 13.4 5.2 6 12.6l-3.1.5.5-3.1z" /><path d="M9.7 3.7 12.3 6.3" /></svg>
+        </button>
+        <button class="panel-btn draft-only" id="panel-copy" data-i18n-title="panel.copy">
+          <svg width="14" height="14" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" /><path d="M10.5 3.2V3A1.5 1.5 0 0 0 9 1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.2" /></svg>
+        </button>
+        <button class="panel-btn draft-only" id="panel-archive" data-i18n-title="panel.archive">
+          <svg width="14" height="14" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="3.5" rx="1" /><path d="M2.8 6v6.5a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1V6" /><path d="M6.3 9h3.4" /></svg>
+        </button>
+      </div>
+    </div>
+    <div id="panel-content" class="md"></div>
+    <div id="commands-content" hidden></div>
+    <div id="search-content" hidden></div>
+    <div id="wiki-content" hidden></div>
+    <div id="resize-grips" aria-hidden="true">
+      <div class="grip n" data-dir="North"></div>
+      <div class="grip s" data-dir="South"></div>
+      <div class="grip w" data-dir="West"></div>
+      <div class="grip e" data-dir="East"></div>
+      <div class="grip nw" data-dir="NorthWest"></div>
+      <div class="grip ne" data-dir="NorthEast"></div>
+      <div class="grip sw" data-dir="SouthWest"></div>
+      <div class="grip se" data-dir="SouthEast"></div>
+    </div>
+    <script type="module" src="/src/panel.ts"></script>
+  </body>
+</html>

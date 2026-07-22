@@ -12,13 +12,18 @@ interface Pool {
   projects: string[];
   running: string[];
   hasCredentials: boolean;
+  /// Bei verwiesenen Pools das fremde Config-Verzeichnis, sonst nicht gesetzt.
+  dir?: string;
 }
 
 const pools = ref<Pool[]>([]);
 const error = ref("");
 const busy = ref(false);
 
-type Mode = "oauth" | "apikey";
+// Claudes Default-Verzeichnis, solange es existiert und kein Pool darauf zeigt.
+const defaultDir = ref<string | null>(null);
+
+type Mode = "oauth" | "apikey" | "reference";
 const dialog = ref<{ mode: Mode; editing: boolean } | null>(null);
 const dName = ref("");
 const dKey = ref("");
@@ -28,12 +33,13 @@ const dPool = ref("");
 const dialogTitle = computed(() => {
   if (!dialog.value) return "";
   if (dialog.value.mode === "oauth") return t("pools.newOauthPool");
+  if (dialog.value.mode === "reference") return t("pools.newReferencePool");
   if (dialog.value.editing) return t("pools.editKey", { name: dName.value });
   return t("pools.newApikeyPool");
 });
 
 function openNew(mode: Mode) {
-  dName.value = "";
+  dName.value = mode === "reference" ? t("pools.referenceDefaultName") : "";
   dKey.value = "";
   dPool.value = "";
   error.value = "";
@@ -56,6 +62,7 @@ function closeDialog() {
 async function refresh() {
   try {
     pools.value = await invoke<Pool[]>("list_pools");
+    defaultDir.value = await invoke<string | null>("default_config_dir");
     error.value = "";
   } catch (e) {
     error.value = String(e);
@@ -74,6 +81,8 @@ async function submit(allowFile = false) {
   try {
     if (d.mode === "oauth") {
       await invoke("create_oauth_pool", { name: dName.value });
+    } else if (d.mode === "reference") {
+      await invoke("create_reference_pool", { name: dName.value, dir: defaultDir.value });
     } else if (d.editing) {
       await invoke("set_apikey", { pool: dPool.value, key: dKey.value, allowFile });
     } else {
@@ -197,11 +206,15 @@ onMounted(refresh);
     <button class="primary" :disabled="busy" @click="openNew('apikey')">
       {{ $t("pools.newApikey") }}
     </button>
+    <button v-if="defaultDir" :disabled="busy" @click="openNew('reference')">
+      {{ $t("pools.newReference") }}
+    </button>
   </div>
 
   <p v-if="error" class="error">{{ error }}</p>
 
-  <table v-if="pools.length" class="grid">
+  <div v-if="pools.length" class="list-scroll">
+  <table class="grid">
     <colgroup>
       <col />
       <col class="col-type" />
@@ -220,6 +233,7 @@ onMounted(refresh);
       <tr v-for="p in pools" :key="p.id">
         <td class="cell-name">
           <strong>{{ p.name }}</strong>
+          <small v-if="p.dir">{{ p.dir }}</small>
         </td>
         <td>
           <span class="badge" :class="p.credentialType">{{ p.credentialType }}</span>
@@ -239,16 +253,19 @@ onMounted(refresh);
             <button :disabled="busy" @click="openRename(p)">
               {{ $t("pools.rename") }}
             </button>
-            <template v-if="p.credentialType === 'oauth'">
+            <template v-if="p.credentialType === 'oauth' && !p.dir">
               <button class="w-action" :disabled="busy" @click="askRelogin(p)">
                 {{ $t("pools.relogin") }}
               </button>
             </template>
-            <template v-else>
+            <template v-else-if="p.credentialType === 'apikey'">
               <button class="w-action" :disabled="busy" @click="openEditKey(p)">
                 {{ p.hasCredentials ? $t("pools.changeKey") : $t("pools.insertKey") }}
               </button>
             </template>
+            <!-- Verwiesener Pool: die Anmeldung gehört dem fremden
+                 Verzeichnis, die App fasst sie nicht an. -->
+            <span v-else class="w-action quiet">{{ $t("pools.referenceLogin") }}</span>
             <span class="tip-wrap" :class="{ 'hover-pop': p.running.length }">
               <button
                 class="danger"
@@ -268,6 +285,7 @@ onMounted(refresh);
       </tr>
     </tbody>
   </table>
+  </div>
   <p v-else class="empty">{{ $t("pools.empty") }}</p>
 
   <div v-if="dialog" class="overlay" @click.self="closeDialog">
@@ -294,12 +312,16 @@ onMounted(refresh);
         {{ $t("pools.oauthHint") }}
       </p>
 
+      <p v-if="dialog.mode === 'reference'" class="hint">
+        {{ $t("pools.referenceHint", { dir: defaultDir ?? "" }) }}
+      </p>
+
       <div class="actions">
         <button type="button" :disabled="busy" @click="closeDialog">
           {{ $t("pools.cancel") }}
         </button>
         <button type="submit" class="primary" :disabled="busy">
-          {{ dialog.mode === "oauth" ? $t("pools.createPool") : $t("pools.save") }}
+          {{ dialog.mode === "apikey" ? $t("pools.save") : $t("pools.createPool") }}
         </button>
       </div>
     </form>

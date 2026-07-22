@@ -1,9 +1,16 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
-use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, ChildKiller, MasterPty, PtySize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+
+use crate::domain::paths::{commands_file, panel_file, search_file, wiki_file, Paths};
+use crate::domain::project::{
+  project_config, project_pool_dir, verify_project_dir_in, ProjectConfig,
+};
+use crate::domain::registry::project_dir;
+use crate::domain::settings::claude_command;
 
 /// Eine laufende PTY-Session, gekoppelt an ein Terminal-Fenster (Key = Fenster-Label).
 pub struct Session {
@@ -22,13 +29,16 @@ pub struct Terminals(pub Mutex<HashMap<String, Session>>);
 /// das Terminal-Fenster hinter der aktiven App.
 #[tauri::command]
 pub fn open_terminal(app: AppHandle, project: String) -> Result<(), String> {
-  let dir = crate::project_dir(&crate::Paths::real(), &project)?;
+  // Prüft zugleich die Projekt-Identität: die config.json im registrierten
+  // Ordner muss diese Projekt-ID tragen (verschobene/ersetzte Ordner fallen
+  // hier auf, statt eine fremde Session zu starten).
+  let dir = verify_project_dir_in(&Paths::real(), &project)?;
   if !dir.is_dir() {
     return Err(format!("Projektordner fehlt: {}", dir.display()));
   }
   let bundle_id = app.config().identifier.clone();
   app
-    .run_on_main_thread(move || yield_activation_to_bundle(&bundle_id))
+    .run_on_main_thread(move || crate::platform::yield_activation(&bundle_id))
     .map_err(|e| e.to_string())?;
   let exe = std::env::current_exe().map_err(|e| e.to_string())?;
   std::process::Command::new(exe)
@@ -36,44 +46,6 @@ pub fn open_terminal(app: AppHandle, project: String) -> Result<(), String> {
     .spawn()
     .map_err(|e| e.to_string())?;
   Ok(())
-}
-
-/// Tritt die Aktivierung an den nächsten startenden Prozess mit dieser
-/// Bundle-ID ab (der Terminal-Prozess läuft unter derselben).
-#[cfg(target_os = "macos")]
-fn yield_activation_to_bundle(bundle_id: &str) {
-  use objc2::MainThreadMarker;
-  use objc2_app_kit::NSApplication;
-  use objc2_foundation::NSString;
-  let mtm =
-    MainThreadMarker::new().expect("yield_activation_to_bundle läuft nicht auf dem Main-Thread");
-  NSApplication::sharedApplication(mtm)
-    .yieldActivationToApplicationWithBundleIdentifier(&NSString::from_str(bundle_id));
-}
-
-/// Linux kennt keine kooperative Aktivierungsabtretung.
-#[cfg(target_os = "linux")]
-fn yield_activation_to_bundle(_bundle_id: &str) {}
-
-/// Selbst-Aktivierung des frisch gestarteten Terminal-Prozesses (Ready-Event);
-/// die Gegenseite hat vorher per yield abgetreten.
-#[cfg(target_os = "macos")]
-pub fn activate_self(app: &AppHandle) {
-  use objc2::MainThreadMarker;
-  use objc2_app_kit::NSApplication;
-  let mtm = MainThreadMarker::new().expect("activate_self läuft nicht auf dem Main-Thread");
-  NSApplication::sharedApplication(mtm).activate();
-  if let Some(window) = app.webview_windows().values().next() {
-    window.set_focus().expect("Terminal-Fenster nicht fokussierbar");
-  }
-}
-
-/// Linux: Fenster ohne NSApplication über die Tauri-API fokussieren.
-#[cfg(target_os = "linux")]
-pub fn activate_self(app: &AppHandle) {
-  if let Some(window) = app.webview_windows().values().next() {
-    window.set_focus().expect("Terminal-Fenster nicht fokussierbar");
-  }
 }
 
 /// Fenster-Hintergrund je Theme — muss zu den Theme-Definitionen in
@@ -88,63 +60,21 @@ fn theme_background(theme: &str) -> (u8, u8, u8) {
   }
 }
 
-/// Setzt das Dock-Icon dieses Terminal-Prozesses aus einer PNG/ICNS-Datei.
-#[cfg(target_os = "macos")]
-pub fn set_dock_icon(path: &str) {
-  use objc2::{AnyThread, MainThreadMarker};
-  use objc2_app_kit::{NSApplication, NSImage};
-  use objc2_foundation::NSString;
-
-  let mtm = MainThreadMarker::new().expect("set_dock_icon läuft nicht auf dem Main-Thread");
-  // Nicht ladbar (Datei weg, TCC-geschützter Ordner wie ~/Downloads): Terminal
-  // ohne eigenes Dock-Icon starten statt den Prozess zu beenden.
-  let Some(img) = NSImage::initWithContentsOfFile(NSImage::alloc(), &NSString::from_str(path))
-  else {
-    eprintln!("Dock-Icon nicht ladbar, Terminal startet ohne: {path}");
-    return;
-  };
-  // unsafe laut objc2-Signatur; das NSImage stammt aus einer Datei und ist gültig.
-  unsafe {
-    NSApplication::sharedApplication(mtm).setApplicationIconImage(Some(&img));
-  }
-}
-
-/// Linux kennt kein Dock-Icon pro Prozess.
-#[cfg(target_os = "linux")]
-pub fn set_dock_icon(_path: &str) {}
-
-/// Holt das Terminal-Fenster eines laufenden Projekts in den Vordergrund:
-/// aktiviert den Terminal-Prozess über seine PID. Aktivierung ist seit
-/// macOS 14 kooperativ — die Tray-App tritt sie vorher ab.
-#[cfg(target_os = "macos")]
-pub fn focus_terminal(pid: u32) {
-  use objc2::MainThreadMarker;
-  use objc2_app_kit::{NSApplication, NSApplicationActivationOptions, NSRunningApplication};
-  let Some(term) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid as i32)
-  else {
-    eprintln!("Terminal-Prozess {pid} nicht gefunden");
-    return;
-  };
-  let mtm = MainThreadMarker::new().expect("focus_terminal läuft nicht auf dem Main-Thread");
-  NSApplication::sharedApplication(mtm).yieldActivationToApplication(&term);
-  term.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
-}
-
-/// Linux: Fremdprozess-Fokus über die PID steht ohne NSRunningApplication
-/// nicht zur Verfügung.
-#[cfg(target_os = "linux")]
-pub fn focus_terminal(_pid: u32) {}
-
 /// Baut das Terminal-Fenster des Terminal-Prozesses. Die PTY entsteht erst,
 /// wenn das Fenster geladen ist und `term_start` ruft — so gehen keine
 /// Ausgaben verloren, bevor der Event-Listener steht.
 pub fn build_window(
   app: &AppHandle,
   project: &str,
-  cfg: &crate::TerminalConfig,
+  cfg: &ProjectConfig,
 ) -> tauri::Result<()> {
-  let (r, g, b) = theme_background(cfg.theme.as_deref().unwrap_or_default());
-  let title = cfg.title.as_deref().unwrap_or(project);
+  let (r, g, b) = theme_background(cfg.terminal.theme.as_deref().unwrap_or_default());
+  let title = cfg
+    .terminal
+    .title
+    .as_deref()
+    .or(cfg.name.as_deref())
+    .unwrap_or(project);
   let builder = WebviewWindowBuilder::new(
     app,
     format!("term-{project}"),
@@ -170,7 +100,14 @@ pub fn build_window(
 
 /// Startet die PTY für das rufende Fenster: das konfigurierte Claude-Kommando
 /// (settings.json: claudeCommand, Default claude) im Projektordner, mit dem
-/// Pool-Verzeichnis als CLAUDE_CONFIG_DIR. zsh -i lädt die .zshrc (PATH, fnm).
+/// Pool-Verzeichnis als CLAUDE_CONFIG_DIR. Die Login-Shell aus $SHELL (-l)
+/// baut den PATH aus ihren Profil-Dateien auf — shell-agnostisch.
+///
+/// Nur das Terminal-Fenster selbst darf seine PTY starten: Die Terminals-Map
+/// ist über das Fensterlabel adressiert, und `term_write` schreibt danach in
+/// die laufende Shell. Ohne die Label-Prüfung könnte auch das abgelöste
+/// Panel-Fenster — und damit jedes Skript in dessen Webview — eine Shell
+/// starten und beschreiben.
 #[tauri::command]
 pub fn term_start(
   window: tauri::WebviewWindow,
@@ -179,18 +116,54 @@ pub fn term_start(
   rows: u16,
   cols: u16,
 ) -> Result<(), String> {
-  let paths = crate::Paths::real();
-  let cwd = crate::project_dir(&paths, &project)?;
+  if window.label() != format!("term-{project}") {
+    return Err(format!("PTY nur für das Terminal-Fenster: {}", window.label()));
+  }
+  let paths = Paths::real();
+  let cwd = project_dir(&paths, &project)?;
 
   let pty = native_pty_system()
     .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
     .map_err(|e| e.to_string())?;
 
-  let mut cmd = CommandBuilder::new("/bin/zsh");
-  cmd.args(["-ic", &crate::claude_command(&paths)]);
+  // Panel-Kanal: leere Datei anlegen (definierter Startzustand für den
+  // Watcher) und ihren Pfad als AI_CONTROL_PANEL in die PTY geben — der Skill
+  // schreibt seinen Entwurf dorthin.
+  let panel_path = panel_file(&project);
+  if let Some(parent) = panel_path.parent() {
+    let _ = std::fs::create_dir_all(parent);
+  }
+  let _ = std::fs::write(&panel_path, "");
+
+  // Command-Kanal: History-Datei (JSONL) leeren — die Befehls-History ist
+  // flüchtig und gilt nur für diese Session; write_commands hängt Records an.
+  let commands_path = commands_file(&project);
+  let _ = std::fs::write(&commands_path, "");
+
+  // Such-Kanal: Treffer-Datei leeren — search_archive schreibt den jeweils
+  // letzten Suchlauf hinein, der Watcher zieht ihn als Kacheln ins Panel.
+  let search_path = search_file(&project);
+  let _ = std::fs::write(&search_path, "");
+
+  // Wiki-Kanal: Puffer leeren — show_archive und wiki_open schreiben die
+  // jeweils aktuelle Wiki-Seite (JSON) hinein.
+  let wiki_path = wiki_file(&project);
+  let _ = std::fs::write(&wiki_path, "");
+
+  let mut cmd = crate::platform::shell_command(&claude_command(&paths));
   cmd.cwd(&cwd);
+  // Aus der App-Umgebung geerbte Anthropic-Credentials rausnehmen — ein
+  // ANTHROPIC_API_KEY sticht sonst den apiKeyHelper des Pools. Variablen, die
+  // erst das Shell-Profil der Login-Shell setzt, erreicht das nicht.
+  cmd.env_remove("ANTHROPIC_API_KEY");
+  cmd.env_remove("ANTHROPIC_AUTH_TOKEN");
   cmd.env("TERM", "xterm-256color");
-  if let Some(pool_dir) = crate::project_pool_dir(&project)? {
+  cmd.env("AI_CONTROL_PANEL", &panel_path);
+  cmd.env("AI_CONTROL_COMMANDS", &commands_path);
+  cmd.env("AI_CONTROL_SEARCH", &search_path);
+  cmd.env("AI_CONTROL_WIKI", &wiki_path);
+  cmd.env("AI_CONTROL_PROJECT", &project);
+  if let Some(pool_dir) = project_pool_dir(&project)? {
     cmd.env("CLAUDE_CONFIG_DIR", pool_dir);
   }
 
@@ -246,10 +219,189 @@ pub fn term_start(
     let _ = app.emit_to(&label, "pty-exit", ());
   });
 
+  spawn_file_watcher(window.app_handle().clone(), panel_path, "panel-update");
+  spawn_file_watcher(
+    window.app_handle().clone(),
+    commands_path,
+    "commands-update",
+  );
+  spawn_file_watcher(window.app_handle().clone(), search_path, "search-update");
+  spawn_file_watcher(window.app_handle().clone(), wiki_path, "wiki-update");
+
   terminals.0.lock().unwrap().insert(
     window.label().to_string(),
     Session { writer, master: pty.master, killer },
   );
+  Ok(())
+}
+
+/// Beobachtet eine Panel-Datei des Projekts (Entwurf oder Command-History)
+/// und schickt neuen Inhalt unter `event` an alle Fenster dieses
+/// Terminal-Prozesses (angedocktes Panel und ein evtl. abgelöstes
+/// Panel-Fenster). Pollt per mtime — kein notify-Crate, die Datei ändert sich
+/// nur, wenn geschrieben wird. Der Thread endet mit dem Prozess (Fenster zu).
+fn spawn_file_watcher(app: AppHandle, path: std::path::PathBuf, event: &'static str) {
+  std::thread::spawn(move || {
+    let mtime = || std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+    let mut last = mtime();
+    loop {
+      std::thread::sleep(std::time::Duration::from_millis(200));
+      let now = mtime();
+      if now != last {
+        last = now;
+        if let Ok(content) = std::fs::read_to_string(&path) {
+          let _ = app.emit(event, content);
+        }
+      }
+    }
+  });
+}
+
+/// Aktueller Panel-Inhalt (Erstbefüllung eines gerade geöffneten Panel-Fensters).
+#[tauri::command]
+pub fn panel_read(project: String) -> String {
+  std::fs::read_to_string(panel_file(&project)).unwrap_or_default()
+}
+
+/// Aktuelle Command-History (JSONL; Erstbefüllung der Kachel-Ansicht).
+#[tauri::command]
+pub fn commands_read(project: String) -> String {
+  std::fs::read_to_string(commands_file(&project)).unwrap_or_default()
+}
+
+/// Entfernt einen Befehl aus der Command-History (Löschen einer Kachel im
+/// Panel) über seine stabile ID, die write_commands beim Schreiben vergibt.
+/// Ein leer gewordener Record fällt mit weg; der Watcher meldet den neuen
+/// Stand als `commands-update`. Doppelklick oder ein zweites Fenster auf
+/// derselben Liste laufen ins „bereits entfernt" statt auf falsche Indizes.
+#[tauri::command]
+pub fn commands_delete(project: String, id: String) -> Result<(), String> {
+  let path = commands_file(&project);
+  let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+  let mut records: Vec<serde_json::Value> = text
+    .lines()
+    .filter(|l| !l.trim().is_empty())
+    .map(|l| serde_json::from_str(l).map_err(|e| e.to_string()))
+    .collect::<Result<_, _>>()?;
+  let mut found = false;
+  for rec in records.iter_mut() {
+    if let Some(cmds) = rec["commands"].as_array_mut() {
+      let before = cmds.len();
+      cmds.retain(|c| c["id"].as_str() != Some(id.as_str()));
+      found = found || cmds.len() != before;
+    }
+  }
+  if !found {
+    return Err("Befehl bereits entfernt".into());
+  }
+  records.retain(|r| r["commands"].as_array().is_none_or(|c| !c.is_empty()));
+  let mut out = String::new();
+  for rec in &records {
+    out.push_str(&rec.to_string());
+    out.push('\n');
+  }
+  std::fs::write(&path, out).map_err(|e| e.to_string())
+}
+
+/// Schreibt den Panel-Inhalt (Titel-Edit im Panel). Der Watcher meldet die
+/// Änderung als `panel-update` an alle Fenster.
+#[tauri::command]
+pub fn panel_set(project: String, text: String) -> Result<(), String> {
+  std::fs::write(panel_file(&project), text).map_err(|e| e.to_string())
+}
+
+/// Letzter Suchlauf (JSON; Erstbefüllung der Treffer-Ansicht).
+#[tauri::command]
+pub fn search_read(project: String) -> String {
+  std::fs::read_to_string(search_file(&project)).unwrap_or_default()
+}
+
+/// Lädt ein Archiv-Dokument in den Dokument-Puffer (Treffer-Klick in der
+/// Suche) — ohne Frontmatter-Block, wie ein frischer Entwurf. Der Watcher
+/// meldet den neuen Inhalt als `panel-update`.
+#[tauri::command]
+pub fn panel_load(project: String, path: String) -> Result<(), String> {
+  let text = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+  let body = crate::domain::archive::strip_frontmatter(&text);
+  std::fs::write(panel_file(&project), body).map_err(|e| e.to_string())
+}
+
+/// Suche aus dem Panel-Suchfeld: läuft wie das MCP-Tool search_archive und
+/// schreibt die Treffer-Datei; der Watcher zieht sie in die Ansicht (beide
+/// Fenster).
+#[tauri::command]
+pub fn search_run(project: String, query: String, tag: Option<String>) -> Result<(), String> {
+  let home = crate::domain::archive::require_archive_home(&project)?;
+  let hits = crate::domain::archive_search::search(&home, &query, tag.as_deref(), 20)?;
+  let payload = serde_json::json!({
+    "query": query,
+    "tag": tag,
+    "home": home.display().to_string(),
+    "hits": hits,
+  });
+  std::fs::write(search_file(&project), payload.to_string()).map_err(|e| e.to_string())
+}
+
+/// Aktueller Wiki-Puffer (JSON; Erstbefüllung der Wiki-Ansicht).
+#[tauri::command]
+pub fn wiki_read(project: String) -> String {
+  std::fs::read_to_string(wiki_file(&project)).unwrap_or_default()
+}
+
+/// Öffnet ein Wiki-Ziel (Klick auf einen `[[…]]`-Link oder Suchtreffer):
+/// `tag:x` → Schlagwort-Seite, `tag:` → Archiv-Übersicht, sonst
+/// Dokument-Auflösung über den Index. Der `tag:`-Namensraum ist damit dort
+/// interpretiert, wo archive_page ihn erzeugt — nicht im Frontend. Schreibt
+/// den Wiki-Puffer; der Watcher meldet ihn als `wiki-update`.
+#[tauri::command]
+pub fn wiki_open(project: String, name: String) -> Result<(), String> {
+  let home = crate::domain::archive::require_archive_home(&project)?;
+  let json = match name.strip_prefix("tag:") {
+    Some(tag) => serde_json::to_string(&crate::domain::archive_index::archive_page(
+      &home,
+      (!tag.is_empty()).then_some(tag),
+    )?),
+    None => serde_json::to_string(&crate::domain::archive_index::wiki_doc(&home, &name)?),
+  }
+  .map_err(|e| e.to_string())?;
+  std::fs::write(wiki_file(&project), json).map_err(|e| e.to_string())
+}
+
+/// Löst das Panel in ein eigenes Fenster ab. Existiert es schon, kommt es nach
+/// vorn. `panel-detached` blendet das angedockte Panel im Terminal-Fenster aus.
+/// Async, weil Fenster-Erzeugung aus einem synchronen Command auf dem
+/// GTK-Mainloop klemmen kann (Tauri-Vorgabe für window create in Commands).
+#[tauri::command]
+pub async fn open_panel_window(app: AppHandle, project: String) -> Result<(), String> {
+  let label = format!("panel-{project}");
+  if let Some(w) = app.get_webview_window(&label) {
+    let _ = w.set_focus();
+    return Ok(());
+  }
+  let cfg = project_config(&project)?;
+  let (r, g, b) = theme_background(cfg.terminal.theme.as_deref().unwrap_or_default());
+  let title = cfg
+    .terminal
+    .title
+    .as_deref()
+    .or(cfg.name.as_deref())
+    .unwrap_or(project.as_str());
+  let builder = WebviewWindowBuilder::new(
+    &app,
+    &label,
+    WebviewUrl::App(format!("panel.html?project={project}").into()),
+  )
+  .title(format!("{title} — Dokument"))
+  .inner_size(480.0, 640.0)
+  .background_color(tauri::window::Color(r, g, b, 0xff));
+
+  // Linux/GNOME: keine GTK-Deko — eigene Kopfleiste in panel.html, wie beim
+  // Terminal-Fenster.
+  #[cfg(target_os = "linux")]
+  let builder = builder.decorations(false);
+
+  builder.build().map_err(|e| e.to_string())?;
+  app.emit("panel-detached", ()).map_err(|e| e.to_string())?;
   Ok(())
 }
 

@@ -123,8 +123,18 @@ input[type="checkbox"] {
 
 main {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 1.5rem;
+}
+
+/* Tab-Inhalte: Toolbar und Fehlerzeile stehen, nur die Liste scrollt. */
+.list-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* ---------- Controls ---------- */
@@ -418,6 +428,15 @@ tbody tr:hover {
   font-family: var(--mono);
   font-size: 0.85rem;
   font-weight: 500;
+}
+
+/* Platzhalter statt Aktionsknopf: verwiesene Pools haben keine Anmeldung,
+   die die App zurücksetzen dürfte. */
+.cell-actions .quiet {
+  color: var(--overlay);
+  font-size: 0.75rem;
+  align-self: center;
+  text-align: center;
 }
 
 .cell-name small {

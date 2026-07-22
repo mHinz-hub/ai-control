@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-terminal-font-size"
+description = "Enables the set_terminal_font_size command without any pre-configured scope."
+commands.allow = ["set_terminal_font_size"]
+
+[[permission]]
+identifier = "deny-set-terminal-font-size"
+description = "Denies the set_terminal_font_size command without any pre-configured scope."
+commands.deny = ["set_terminal_font_size"]

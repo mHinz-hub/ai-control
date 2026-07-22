@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rename-pool"
+description = "Enables the rename_pool command without any pre-configured scope."
+commands.allow = ["rename_pool"]
+
+[[permission]]
+identifier = "deny-rename-pool"
+description = "Denies the rename_pool command without any pre-configured scope."
+commands.deny = ["rename_pool"]

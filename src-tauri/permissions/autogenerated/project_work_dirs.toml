@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-project-work-dirs"
+description = "Enables the project_work_dirs command without any pre-configured scope."
+commands.allow = ["project_work_dirs"]
+
+[[permission]]
+identifier = "deny-project-work-dirs"
+description = "Denies the project_work_dirs command without any pre-configured scope."
+commands.deny = ["project_work_dirs"]

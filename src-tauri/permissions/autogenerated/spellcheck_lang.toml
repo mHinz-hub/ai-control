@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-spellcheck-lang"
+description = "Enables the spellcheck_lang command without any pre-configured scope."
+commands.allow = ["spellcheck_lang"]
+
+[[permission]]
+identifier = "deny-spellcheck-lang"
+description = "Denies the spellcheck_lang command without any pre-configured scope."
+commands.deny = ["spellcheck_lang"]

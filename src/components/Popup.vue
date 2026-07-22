@@ -2,28 +2,33 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { currentMonitor } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 
 interface Project {
+  id: string;
   name: string;
   running: boolean;
   terminal: { theme: string | null; icon: string | null; title: string | null };
 }
 
 const WIDTH = 300;
+// Sicherheitsabstand für Panel + Rand; die Extension klemmt zusätzlich exakt.
+const MARGIN = 64;
 
 const projects = ref<Project[]>([]);
 const icons = ref<Record<string, string>>({});
 const wrapRef = ref<HTMLElement>();
+const maxH = ref(10000);
 const win = getCurrentWebviewWindow();
 
 async function refresh() {
   try {
     projects.value = await invoke<Project[]>("list_projects");
     for (const p of projects.value) {
-      if (p.terminal.icon && !(p.name in icons.value)) {
-        icons.value[p.name] =
-          (await invoke<string | null>("project_icon", { project: p.name })) ?? "";
+      if (p.terminal.icon && !(p.id in icons.value)) {
+        icons.value[p.id] =
+          (await invoke<string | null>("project_icon", { project: p.id })) ?? "";
       }
     }
   } catch (e) {
@@ -32,7 +37,7 @@ async function refresh() {
 }
 
 async function pick(p: Project) {
-  await invoke("start_or_focus_cmd", { project: p.name });
+  await invoke("start_or_focus_cmd", { project: p.id });
   await win.hide();
 }
 async function openMain() {
@@ -46,12 +51,14 @@ async function quit() {
 // Fenster nur so hoch wie der Inhalt: bei jeder Layout-Änderung nachziehen.
 let ro: ResizeObserver | undefined;
 let timer: number;
-onMounted(() => {
+onMounted(async () => {
+  const mon = await currentMonitor();
+  if (mon) maxH.value = Math.floor(mon.size.height / mon.scaleFactor) - MARGIN;
   refresh();
   timer = window.setInterval(refresh, 2000);
   if (wrapRef.value) {
     ro = new ResizeObserver(() => {
-      const h = Math.ceil(wrapRef.value!.getBoundingClientRect().height);
+      const h = Math.min(Math.ceil(wrapRef.value!.getBoundingClientRect().height), maxH.value);
       if (h > 0) win.setSize(new LogicalSize(WIDTH, h));
     });
     ro.observe(wrapRef.value);
@@ -64,11 +71,11 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div ref="wrapRef" class="wrap">
+  <div ref="wrapRef" class="wrap" :style="{ maxHeight: maxH + 'px' }">
     <ul class="list">
-      <li v-for="p in projects" :key="p.name" class="row" @click="pick(p)">
+      <li v-for="p in projects" :key="p.id" class="row" @click="pick(p)">
         <span class="dot" :class="{ on: p.running }"></span>
-        <img v-if="icons[p.name]" class="ic" :src="icons[p.name]" />
+        <img v-if="icons[p.id]" class="ic" :src="icons[p.id]" />
         <span v-else class="ic ph"></span>
         <span class="nm">{{ p.name }}</span>
       </li>
@@ -76,8 +83,8 @@ onUnmounted(() => {
     </ul>
 
     <footer class="ft">
-      <button class="fbtn" @click="openMain">Öffnen</button>
-      <button class="fbtn danger" @click="quit">Beenden</button>
+      <button class="fbtn" @click="openMain">{{ $t("popup.open") }}</button>
+      <button class="fbtn danger" @click="quit">{{ $t("popup.quit") }}</button>
     </footer>
   </div>
 </template>
@@ -86,6 +93,8 @@ onUnmounted(() => {
 .wrap {
   width: 300px;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   background: #1e1e2e;
   color: #cdd6f4;
   border: 1px solid #313244;
@@ -101,6 +110,9 @@ onUnmounted(() => {
   list-style: none;
   margin: 0;
   padding: 5px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .row {
@@ -154,6 +166,7 @@ onUnmounted(() => {
 
 .ft {
   display: flex;
+  flex: none;
   gap: 6px;
   padding: 5px 6px 6px;
   border-top: 1px solid #313244;

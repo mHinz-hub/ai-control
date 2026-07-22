@@ -2,207 +2,79 @@
 <html lang="de">
   <head>
     <meta charset="UTF-8" />
-    <title>Terminal</title>
-    <style>
-      html,
-      body {
-        height: 100%;
-        margin: 0;
-        background: #1e1e2e;
-        overflow: hidden;
-      }
-      body {
-        display: flex;
-        flex-direction: column;
-      }
-      header {
-        height: 40px;
-        flex: none;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        /* Linux: schmaler Rand links; macOS: Ampel-Platz (Override unten) */
-        padding: 0 0 0 16px;
-        background: #181825;
-        border-bottom: 1px solid #313244;
-        color: #cdd6f4;
-        font:
-          500 13px/1 -apple-system,
-          system-ui,
-          sans-serif;
-        user-select: none;
-        -webkit-user-select: none;
-        cursor: default;
-      }
-      /* macOS: Platz links für die Ampel, eigene Fensterknöpfe aus. */
-      :root[data-platform="mac"] header {
-        padding-left: 84px;
-        padding-right: 16px;
-      }
-      :root[data-platform="mac"] #winbtns {
-        display: none;
-      }
-      #project-icon {
-        width: 18px;
-        height: 18px;
-        border-radius: 4px;
-      }
-      #project-icon[hidden] {
-        display: none;
-      }
-      #pool {
-        margin-left: auto;
-        background: #313244;
-        color: #a6adc8;
-        border-radius: 999px;
-        padding: 4px 12px;
-        font-size: 11px;
-      }
-      #pool:empty {
-        display: none;
-      }
-      /* Eigene Fensterknöpfe (Linux): rechtsbündig, volle Header-Höhe. */
-      #winbtns {
-        margin-left: 8px;
-        display: flex;
-        align-self: stretch;
-      }
-      #pool:empty + #winbtns {
-        margin-left: auto;
-      }
-      .winbtn {
-        width: 44px;
-        height: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border: none;
-        background: transparent;
-        color: inherit;
-        cursor: default;
-        transition: background 0.12s ease;
-      }
-      .winbtn svg {
-        stroke: currentColor;
-        stroke-width: 1.2;
-        opacity: 0.8;
-      }
-      .winbtn:hover {
-        background: #313244;
-      }
-      .winbtn:hover svg {
-        opacity: 1;
-      }
-      .winbtn.close:hover {
-        background: #f38ba8;
-        color: #11111b;
-      }
-      /* Resize-Zonen für das dekorationslose Fenster (nur Linux). */
-      #resize-grips {
-        display: none;
-      }
-      :root[data-platform="other"] #resize-grips {
-        display: block;
-      }
-      .grip {
-        position: fixed;
-        z-index: 100;
-      }
-      .grip.n {
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 4px;
-        cursor: ns-resize;
-      }
-      .grip.s {
-        bottom: 0;
-        left: 0;
-        right: 0;
-        height: 4px;
-        cursor: ns-resize;
-      }
-      .grip.w {
-        top: 0;
-        bottom: 0;
-        left: 0;
-        width: 4px;
-        cursor: ew-resize;
-      }
-      .grip.e {
-        top: 0;
-        bottom: 0;
-        right: 0;
-        width: 4px;
-        cursor: ew-resize;
-      }
-      .grip.nw {
-        top: 0;
-        left: 0;
-        width: 9px;
-        height: 9px;
-        cursor: nwse-resize;
-        z-index: 101;
-      }
-      .grip.ne {
-        top: 0;
-        right: 0;
-        width: 9px;
-        height: 9px;
-        cursor: nesw-resize;
-        z-index: 101;
-      }
-      .grip.sw {
-        bottom: 0;
-        left: 0;
-        width: 9px;
-        height: 9px;
-        cursor: nesw-resize;
-        z-index: 101;
-      }
-      .grip.se {
-        bottom: 0;
-        right: 0;
-        width: 9px;
-        height: 9px;
-        cursor: nwse-resize;
-        z-index: 101;
-      }
-      #term {
-        flex: 1;
-        min-height: 0;
-        padding: 12px 4px 12px 14px;
-      }
-      #term .xterm-viewport::-webkit-scrollbar {
-        width: 8px;
-      }
-      #term .xterm-viewport::-webkit-scrollbar-thumb {
-        background: #313244;
-        border-radius: 4px;
-      }
-      #term .xterm-viewport::-webkit-scrollbar-track {
-        background: transparent;
-      }
-    </style>
+    <title data-i18n="panel.windowTerminal">Terminal</title>
   </head>
   <body>
     <header data-tauri-drag-region>
       <img id="project-icon" hidden data-tauri-drag-region />
       <span id="project-name" data-tauri-drag-region></span>
+      <div class="panel-tabs" id="panel-tabs">
+        <button class="panel-btn" data-mode="commands" data-i18n-title="panel.tabCommandsTitle" data-i18n="panel.tabCommands">Befehle</button>
+        <span class="tab-sep"></span>
+        <button class="panel-btn" data-mode="draft" data-i18n-title="panel.tabDraftTitle" data-i18n="panel.tabDraft">Dokument</button>
+        <button class="panel-btn" data-mode="wiki" data-i18n-title="panel.tabWikiTitle" data-i18n="panel.tabWiki">Wiki</button>
+        <button class="panel-btn" data-mode="search" data-i18n-title="panel.tabSearchTitle" data-i18n="panel.tabSearch">Suche</button>
+        <span class="tab-sep"></span>
+      </div>
       <span id="pool"></span>
       <div id="winbtns">
-        <button class="winbtn" id="win-min" aria-label="Minimieren">
+        <button class="winbtn" id="win-min" data-i18n-aria="panel.minimize">
           <svg width="12" height="12" viewBox="0 0 12 12"><line x1="2" y1="6.5" x2="10" y2="6.5" /></svg>
         </button>
-        <button class="winbtn" id="win-max" aria-label="Maximieren">
+        <button class="winbtn" id="win-max" data-i18n-aria="panel.maximize">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="2.5" y="2.5" width="7" height="7" rx="1" /></svg>
         </button>
-        <button class="winbtn close" id="win-close" aria-label="Schließen">
+        <button class="winbtn close" id="win-close" data-i18n-aria="panel.close">
           <svg width="12" height="12" viewBox="0 0 12 12"><line x1="2.7" y1="2.7" x2="9.3" y2="9.3" /><line x1="9.3" y1="2.7" x2="2.7" y2="9.3" /></svg>
         </button>
       </div>
     </header>
-    <div id="term"></div>
+    <div id="body">
+      <div id="term"></div>
+      <div id="splitter" hidden></div>
+      <aside id="panel" hidden>
+        <div class="panel-head">
+          <div class="panel-titlerow">
+            <span class="panel-title" data-i18n="panel.tabDraft">Dokument</span>
+            <button class="panel-btn panel-edit draft-only" id="panel-title-edit" data-i18n-title="panel.editTitle">✎</button>
+            <button class="panel-btn" id="panel-detach" data-i18n-title="panel.detach">
+              <svg width="14" height="14" viewBox="0 0 16 16"><path d="M12.5 8.5V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1h4.5" /><path d="M10 2h4v4" /><path d="M14 2 8 8" /></svg>
+            </button>
+            <button class="panel-btn" id="panel-hide" data-i18n-title="panel.hidePanel">
+              <svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" /></svg>
+            </button>
+          </div>
+          <div class="panel-actions">
+            <select class="panel-lang draft-only" id="panel-lang" data-i18n-title="panel.spellcheckLang">
+              <option value="de">DE</option>
+              <option value="en">EN</option>
+              <option value="en-GB">EN-GB</option>
+              <option value="fr">FR</option>
+              <option value="es">ES</option>
+              <option value="it">IT</option>
+              <option value="nl">NL</option>
+            </select>
+            <button class="panel-btn draft-only" id="panel-wiki-jump" data-i18n-title="panel.openInWiki">
+              <svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 3.5C6.6 2.4 4.6 2 2.5 2v11c2.1 0 4.1.4 5.5 1.5 1.4-1.1 3.4-1.5 5.5-1.5V2c-2.1 0-4.1.4-5.5 1.5z" /><path d="M8 3.5v11" /></svg>
+            </button>
+            <button class="panel-btn draft-only" id="panel-mode" data-i18n-title="panel.toggleRaw" data-i18n="panel.rendered">MD</button>
+            <button class="panel-btn draft-only" id="panel-content-edit" data-i18n-title="panel.editDraft">
+              <svg width="14" height="14" viewBox="0 0 16 16"><path d="M10.8 2.6 13.4 5.2 6 12.6l-3.1.5.5-3.1z" /><path d="M9.7 3.7 12.3 6.3" /></svg>
+            </button>
+            <button class="panel-btn draft-only" id="panel-copy" data-i18n-title="panel.copy">
+              <svg width="14" height="14" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" /><path d="M10.5 3.2V3A1.5 1.5 0 0 0 9 1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.2" /></svg>
+            </button>
+            <button class="panel-btn draft-only" id="panel-archive" data-i18n-title="panel.archive">
+              <svg width="14" height="14" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="3.5" rx="1" /><path d="M2.8 6v6.5a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1V6" /><path d="M6.3 9h3.4" /></svg>
+            </button>
+          </div>
+        </div>
+        <div id="panel-content" class="md"></div>
+        <div id="commands-content" hidden></div>
+        <div id="search-content" hidden></div>
+        <div id="wiki-content" hidden></div>
+      </aside>
+    </div>
     <div id="resize-grips" aria-hidden="true">
       <div class="grip n" data-dir="North"></div>
       <div class="grip s" data-dir="South"></div>

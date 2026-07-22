@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-assign-pool"
+description = "Enables the assign_pool command without any pre-configured scope."
+commands.allow = ["assign_pool"]
+
+[[permission]]
+identifier = "deny-assign-pool"
+description = "Denies the assign_pool command without any pre-configured scope."
+commands.deny = ["assign_pool"]

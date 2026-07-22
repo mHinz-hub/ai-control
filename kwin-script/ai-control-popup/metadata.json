@@ -1,0 +1,14 @@
+{
+  "KPlugin": {
+    "Id": "ai-control-popup",
+    "Name": "ai-control Popup Positioner",
+    "Description": "Schiebt das rahmenlose ai-control-Popup an den Mauszeiger — das Pendant zur GNOME-Shell-Extension, nur für KWin (Wayland erlaubt Positionieren nur im Compositor).",
+    "Authors": [{ "Name": "marcus.hinz" }],
+    "Version": "1.0",
+    "License": "MIT",
+    "EnabledByDefault": false
+  },
+  "KPackageStructure": "KWin/Script",
+  "X-Plasma-API": "javascript",
+  "X-Plasma-MainScript": "code/main.js"
+}

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-restart-project"
+description = "Enables the restart_project command without any pre-configured scope."
+commands.allow = ["restart_project"]
+
+[[permission]]
+identifier = "deny-restart-project"
+description = "Denies the restart_project command without any pre-configured scope."
+commands.deny = ["restart_project"]

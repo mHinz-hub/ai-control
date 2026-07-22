@@ -1,0 +1,39 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "panel",
+  "description": "Abgelöstes Panel-Fenster: nur Panel-/Archiv-Kanäle, keine PTY, keine Verwaltung.",
+  "windows": [
+    "panel-*"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-outer-position",
+    "core:window:allow-inner-size",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-hide",
+    "core:window:allow-start-resize-dragging",
+    "autostart:default",
+    "dialog:default",
+    "clipboard-manager:allow-write-text",
+    "allow-commands-delete",
+    "allow-commands-read",
+    "allow-list-projects",
+    "allow-panel-archive-cmd",
+    "allow-panel-archive-dir-cmd",
+    "allow-panel-load",
+    "allow-panel-read",
+    "allow-panel-set",
+    "allow-reveal-path-cmd",
+    "allow-search-read",
+    "allow-search-run",
+    "allow-spellcheck-lang",
+    "allow-term-log",
+    "allow-wiki-open",
+    "allow-wiki-read"
+  ]
+}

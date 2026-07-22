@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-archive-home-cmd"
+description = "Enables the clear_archive_home_cmd command without any pre-configured scope."
+commands.allow = ["clear_archive_home_cmd"]
+
+[[permission]]
+identifier = "deny-clear-archive-home-cmd"
+description = "Denies the clear_archive_home_cmd command without any pre-configured scope."
+commands.deny = ["clear_archive_home_cmd"]

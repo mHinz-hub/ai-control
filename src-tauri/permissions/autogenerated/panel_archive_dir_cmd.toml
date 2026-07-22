@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-panel-archive-dir-cmd"
+description = "Enables the panel_archive_dir_cmd command without any pre-configured scope."
+commands.allow = ["panel_archive_dir_cmd"]
+
+[[permission]]
+identifier = "deny-panel-archive-dir-cmd"
+description = "Denies the panel_archive_dir_cmd command without any pre-configured scope."
+commands.deny = ["panel_archive_dir_cmd"]

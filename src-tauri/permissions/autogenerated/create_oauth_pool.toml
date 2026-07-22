@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-oauth-pool"
+description = "Enables the create_oauth_pool command without any pre-configured scope."
+commands.allow = ["create_oauth_pool"]
+
+[[permission]]
+identifier = "deny-create-oauth-pool"
+description = "Denies the create_oauth_pool command without any pre-configured scope."
+commands.deny = ["create_oauth_pool"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-unassign-pool"
+description = "Enables the unassign_pool command without any pre-configured scope."
+commands.allow = ["unassign_pool"]
+
+[[permission]]
+identifier = "deny-unassign-pool"
+description = "Denies the unassign_pool command without any pre-configured scope."
+commands.deny = ["unassign_pool"]
