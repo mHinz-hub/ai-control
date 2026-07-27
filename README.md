@@ -101,7 +101,9 @@ The app **enables the matching piece automatically** on each start, per user and
 
 ### Installer tests
 
-The installers are hand-tested per release. Current state: Fedora 44 via rpm on GNOME, KDE Plasma, Cinnamon, and XFCE (VM test fleet); Ubuntu 26.04 (GNOME), Kubuntu (KDE Plasma, Wayland) and Linux Mint (Cinnamon) via deb in earlier rounds. The two open findings from that round are resolved: popup placement on Cinnamon Wayland now comes from the bundled Cinnamon extension, and click-outside-to-close verified fine on XFCE and Cinnamon. macOS re-test of the current build is in progress.
+The installers are hand-tested per release. For 0.4.0 the rpm was installed over the previous version on all four VMs of the test fleet — Fedora 44 with GNOME (Wayland), KDE Plasma (Wayland), Cinnamon and XFCE — and each one checked for tray icon, popup placement, terminal window, archive tree, ePub reader and commit dialog. The renamed paths were verified along the way: `~/.config/ai-central`, the project's `.ai-central/` folder, the `AI_CENTRAL_*` environment, and the GNOME extension enabling itself on first start. Ubuntu 26.04 (GNOME), Kubuntu (KDE Plasma, Wayland) and Linux Mint (Cinnamon) were covered via deb in earlier rounds.
+
+Not covered in this round: Cinnamon on **Wayland**. The fleet's Cinnamon guest logs in through gdm autologin, which starts the X11 session — the Wayland path of the bundled Cinnamon extension (popup placement, where a client cannot position its own window) was last verified in the 0.3.0 round.
 
 ### Windows
 
