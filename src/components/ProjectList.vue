@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
 
 interface Project {
   id: string;
@@ -157,6 +161,12 @@ function contractHome(p: string): string {
   return p.replace(/^\/(?:home|Users)\/[^/]+/, "~");
 }
 
+interface ModuleState {
+  id: string;
+  core: boolean;
+  enabled: boolean;
+}
+
 interface TerminalSettings {
   id: string;
   name: string;
@@ -164,20 +174,22 @@ interface TerminalSettings {
   theme: string;
   icon: string | null;
   title: string;
-  todo: boolean;
   workDirs: string[];
   archiveHome: string | null;
+  modules: ModuleState[];
 }
 
 const settings = ref<TerminalSettings | null>(null);
 
 async function openSettings(p: Project) {
   try {
-    const todo = await invoke<boolean>("todo_state", { project: p.id });
     const workDirs = await invoke<string[]>("project_work_dirs", {
       project: p.id,
     });
     const archiveHome = await invoke<string | null>("panel_archive_dir_cmd", {
+      project: p.id,
+    });
+    const modules = await invoke<ModuleState[]>("module_registry", {
       project: p.id,
     });
     settings.value = {
@@ -187,11 +199,23 @@ async function openSettings(p: Project) {
       theme: p.terminal.theme ?? "mocha",
       icon: p.terminal.icon,
       title: p.terminal.title ?? "",
-      todo,
       workDirs,
       archiveHome,
+      modules,
     };
   } catch (e) {
+    error.value = String(e);
+  }
+}
+
+// Modul-Schalter schreiben sofort in die Projekt-Config (nur Abweichungen
+// vom Default); ein Fehler stellt die Checkbox zurück.
+async function toggleModule(m: ModuleState) {
+  const s = settings.value!;
+  try {
+    await invoke("set_module", { project: s.id, module: m.id, enabled: m.enabled });
+  } catch (e) {
+    m.enabled = !m.enabled;
     error.value = String(e);
   }
 }
@@ -308,7 +332,6 @@ async function saveSettings() {
       icon: s.icon,
       title: title === "" ? null : title,
     });
-    await invoke("set_todo", { project: s.id, enabled: s.todo });
     settings.value = null;
     await refresh();
   } catch (e) {
@@ -325,7 +348,6 @@ interface Wizard {
   workDir: string | null;
   title: string;
   theme: string;
-  todo: boolean;
 }
 
 const wizard = ref<Wizard | null>(null);
@@ -341,7 +363,6 @@ function openWizard() {
     workDir: null,
     title: "",
     theme: "mocha",
-    todo: false,
   };
 }
 
@@ -396,7 +417,6 @@ async function createProject() {
         icon: null,
         title: title === "" ? null : title,
       },
-      todo: w.todo,
     });
     wizard.value = null;
     await refresh();
@@ -410,7 +430,6 @@ interface DeletePreview {
   projectDir: string;
   aiControlDir: boolean;
   archivePermission: boolean;
-  todoHook: boolean;
   panelFiles: number;
   archiveHome: string | null;
   archiveDocs: number;
@@ -455,12 +474,69 @@ async function confirmDelete() {
   }
 }
 
+// ---------- Pool-Pflicht ----------
+
+// Start ohne zugewiesenen Pool: Der Kern verweigert die Session, die App holt
+// die Wahl hier nach. Kein Pool bedeutet keinen Start — auch nicht still im
+// Default-Verzeichnis von claude.
+const poolRequired = ref<{ id: string; name: string } | null>(null);
+const poolPick = ref("");
+// Claudes Default-Verzeichnis, solange kein Pool darauf zeigt: als
+// ausdrücklich wählbarer Eintrag, nicht als stille Übernahme.
+const defaultDir = ref<string | null>(null);
+const DEFAULT_PICK = "__default__";
+
+async function askForPool(id: string) {
+  await refresh();
+  const p = projects.value.find((x) => x.id === id);
+  if (!p || p.pool) return;
+  try {
+    defaultDir.value = await invoke<string | null>("default_config_dir");
+  } catch {
+    defaultDir.value = null;
+  }
+  poolPick.value = "";
+  poolRequired.value = { id, name: p.name };
+}
+
+async function confirmPool() {
+  const req = poolRequired.value!;
+  try {
+    let pool = poolPick.value;
+    if (pool === DEFAULT_PICK) {
+      pool = await invoke<string>("create_reference_pool", {
+        name: t("pools.referenceDefaultName"),
+        dir: defaultDir.value,
+      });
+    }
+    await invoke("assign_pool", { project: req.id, pool });
+    poolRequired.value = null;
+    await invoke("open_terminal", { project: req.id });
+    await refresh();
+  } catch (e) {
+    error.value = String(e);
+    poolRequired.value = null;
+  }
+}
+
+// Abbruch ist eine Entscheidung, kein Nichts: kein Terminal, und die Meldung
+// sagt, warum.
+function cancelPool() {
+  error.value = t("projects.poolRequiredCancelled", { name: poolRequired.value!.name });
+  poolRequired.value = null;
+}
+
 let timer: number;
-onMounted(() => {
+let unlistenPool: UnlistenFn | undefined;
+onMounted(async () => {
   refresh();
   timer = window.setInterval(refresh, 3000);
+  unlistenPool = await listen<string>("pool-required", (e) => askForPool(e.payload));
 });
-onUnmounted(() => window.clearInterval(timer));
+onUnmounted(() => {
+  window.clearInterval(timer);
+  unlistenPool?.();
+});
 </script>
 
 <template>
@@ -619,13 +695,6 @@ onUnmounted(() => window.clearInterval(timer));
           </option>
         </select>
       </label>
-      <label class="field">
-        {{ $t("projects.todo") }}
-        <span class="checkline">
-          <input v-model="wizard.todo" type="checkbox" />
-          {{ $t("projects.todoDesc") }}
-        </span>
-      </label>
       <p class="hint">{{ $t("projects.wizardHint") }}</p>
       <div class="actions">
         <button type="button" @click="wizard = null">
@@ -693,7 +762,6 @@ onUnmounted(() => window.clearInterval(timer));
         <li>{{ $t("projects.artRegistry") }}</li>
         <li v-if="pendingDelete.preview.aiControlDir">{{ $t("projects.artAiControl") }}</li>
         <li v-if="pendingDelete.preview.archivePermission">{{ $t("projects.artArchivePerm") }}</li>
-        <li v-if="pendingDelete.preview.todoHook">{{ $t("projects.artTodoHook") }}</li>
         <li v-if="pendingDelete.preview.panelFiles">
           {{ $t("projects.artPanelFiles", pendingDelete.preview.panelFiles) }}
         </li>
@@ -801,32 +869,36 @@ onUnmounted(() => window.clearInterval(timer));
             <button @click="addWorkDir">{{ $t("projects.addWorkDir") }}</button>
           </span>
         </div>
-        <div class="srow">
-          <span class="slbl">{{ $t("projects.archive") }}</span>
-          <span class="sval">
-            <span v-if="settings.archiveHome" class="spath hover-pop">
-              {{ contractHome(settings.archiveHome) }}
-              <span class="pop pop-path">{{ settings.archiveHome }}</span>
-            </span>
-            <span v-else class="spath muted">{{ $t("projects.archiveNone") }}</span>
-          </span>
-          <span class="sacts">
-            <button @click="chooseArchive">{{ $t("projects.changeDir") }}</button>
-            <button v-if="settings.archiveHome" @click="clearArchive">
-              {{ $t("projects.remove") }}
-            </button>
-          </span>
-        </div>
         <p class="ghint">{{ $t("projects.writesImmediately") }}</p>
       </section>
 
-      <section class="sgroup">
-        <h4 class="eyebrow">{{ $t("projects.groupSession") }}</h4>
-        <label class="checkline todo-line">
-          <input v-model="settings.todo" type="checkbox" />
-          <span>{{ $t("projects.todo") }} — {{ $t("projects.todoDesc") }}</span>
-        </label>
+      <section class="sgroup instant">
+        <h4 class="eyebrow">{{ $t("projects.groupModules") }}</h4>
+        <template v-for="m in settings.modules.filter((x) => !x.core)" :key="m.id">
+          <label class="checkline">
+            <input v-model="m.enabled" type="checkbox" @change="toggleModule(m)" />
+            <span>{{ $t(`modules.${m.id}`) }} — {{ $t(`modules.${m.id}Desc`) }}</span>
+          </label>
+          <div v-if="m.id === 'archive'" class="srow">
+            <span class="slbl">{{ $t("projects.archive") }}</span>
+            <span class="sval">
+              <span v-if="settings.archiveHome" class="spath hover-pop">
+                {{ contractHome(settings.archiveHome) }}
+                <span class="pop pop-path">{{ settings.archiveHome }}</span>
+              </span>
+              <span v-else class="spath muted">{{ $t("projects.archiveNone") }}</span>
+            </span>
+            <span class="sacts">
+              <button @click="chooseArchive">{{ $t("projects.changeDir") }}</button>
+              <button v-if="settings.archiveHome" @click="clearArchive">
+                {{ $t("projects.remove") }}
+              </button>
+            </span>
+          </div>
+        </template>
+        <p class="ghint">{{ $t("projects.writesImmediately") }}</p>
       </section>
+
       </div>
 
       <div class="actions">
@@ -877,6 +949,31 @@ onUnmounted(() => window.clearInterval(timer));
         <button @click="pending = null">{{ $t("projects.keepRunning") }}</button>
         <button class="primary" :disabled="restarting" @click="restartNow">
           {{ restarting ? $t("projects.restarting") : $t("projects.restartNow") }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="poolRequired" class="overlay">
+    <div class="dialog">
+      <h3>{{ $t("projects.poolRequiredTitle", { name: poolRequired.name }) }}</h3>
+      <p>{{ $t("projects.poolRequiredHint") }}</p>
+      <label class="field">
+        {{ $t("projects.pool") }}
+        <select v-model="poolPick">
+          <option value="" disabled>{{ $t("projects.poolRequiredChoose") }}</option>
+          <option v-for="pool in pools" :key="pool.id" :value="pool.id">
+            {{ pool.name }}
+          </option>
+          <option v-if="defaultDir" :value="DEFAULT_PICK">
+            {{ $t("projects.poolRequiredDefault", { dir: contractHome(defaultDir) }) }}
+          </option>
+        </select>
+      </label>
+      <div class="actions">
+        <button type="button" @click="cancelPool">{{ $t("projects.cancel") }}</button>
+        <button class="primary" :disabled="!poolPick" @click="confirmPool">
+          {{ $t("projects.start") }}
         </button>
       </div>
     </div>
@@ -1014,12 +1111,6 @@ onUnmounted(() => window.clearInterval(timer));
   display: flex;
   gap: 0.4rem;
   justify-content: flex-end;
-}
-
-/* Todo-Zeile: volle Dialogbreite, der Text wird nie gekürzt. */
-.todo-line {
-  font-size: 0.85rem;
-  color: var(--subtext);
 }
 
 .spath {

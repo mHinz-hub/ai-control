@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <title data-i18n="commit.window">Commit</title>
+  </head>
+  <body>
+    <div class="panel-topbar" data-tauri-drag-region>
+      <span class="commit-heading" data-i18n="commit.window" data-tauri-drag-region>Commit</span>
+      <button class="winbtn osctl" id="win-min" data-i18n-aria="panel.minimize">
+        <svg width="12" height="12" viewBox="0 0 12 12"><line x1="2" y1="6.5" x2="10" y2="6.5" /></svg>
+      </button>
+      <button class="winbtn osctl" id="win-max" data-i18n-aria="panel.maximize">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="2.5" y="2.5" width="7" height="7" rx="1" /></svg>
+      </button>
+      <button class="winbtn close" id="win-close" data-i18n-aria="panel.close">
+        <svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" /></svg>
+      </button>
+    </div>
+    <div class="commit-body">
+      <nav class="commit-repos" id="repos"></nav>
+      <div class="commit-files">
+        <div class="commit-filehead">
+          <label class="commit-all"><input type="checkbox" id="all" /><span data-i18n="commit.selectAll">Alle auswählen</span></label>
+        </div>
+        <div class="commit-filelist" id="files"></div>
+      </div>
+      <pre class="commit-diff" id="diff"></pre>
+    </div>
+    <footer class="commit-foot">
+      <textarea id="msg" rows="3" spellcheck="true" data-i18n-placeholder="commit.messagePlaceholder"></textarea>
+      <div class="commit-actions">
+        <span class="commit-status" id="status"></span>
+        <div class="commit-buttons">
+          <button class="commit-btn" id="commit" data-i18n="commit.commit">Commit</button>
+          <button class="commit-btn" id="commit-push" data-i18n="commit.commitPush">Commit und Push</button>
+        </div>
+      </div>
+    </footer>
+    <div id="resize-grips" aria-hidden="true">
+      <div class="grip n" data-dir="North"></div>
+      <div class="grip s" data-dir="South"></div>
+      <div class="grip w" data-dir="West"></div>
+      <div class="grip e" data-dir="East"></div>
+      <div class="grip nw" data-dir="NorthWest"></div>
+      <div class="grip ne" data-dir="NorthEast"></div>
+      <div class="grip sw" data-dir="SouthWest"></div>
+      <div class="grip se" data-dir="SouthEast"></div>
+    </div>
+    <script type="module" src="/src/commit.ts"></script>
+  </body>
+</html>

@@ -1,6 +1,6 @@
 //! Minimaler MCP-stdio-Server (`app --mcp-panel`), den claude als Tool-Server
 //! startet. Er stellt genau ein Tool bereit: `write_panel(text)` schreibt den
-//! Text in die Panel-Datei aus `AI_CONTROL_PANEL` (dieselbe Env, die der
+//! Text in die Panel-Datei aus `AI_CENTRAL_PANEL` (dieselbe Env, die der
 //! Terminal-Prozess der PTY mitgibt und die claude an seine MCP-Kinder vererbt).
 //! Der bestehende Datei-Watcher im Terminal-Prozess zieht den Inhalt ins Panel.
 //!
@@ -57,13 +57,47 @@ fn handle(method: &str, req: &Value) -> Option<Value> {
         "serverInfo": { "name": "text-panel", "version": env!("CARGO_PKG_VERSION") },
       }))
     }
+    // Die Tool-Liste kommt aus der Modul-Registry: nur Tools der im Projekt
+    // aktiven Module. Eine laufende Session behält ihre Liste vom Start —
+    // nachträglich abgeschaltete Module fängt der Guard in call_tool ab.
     "tools/list" => Some(json!({
-      "tools": [
-        {
+      "tools": active_modules()
+        .iter()
+        .flat_map(|m| m.mcp_tools)
+        .map(|name| tool_def(name))
+        .collect::<Vec<Value>>(),
+    })),
+    "tools/call" => Some(call_tool(req)),
+    "ping" => Some(json!({})),
+    _ => None,
+  }
+}
+
+/// Aktive Module des Projekts aus AI_CENTRAL_PROJECT. Ohne lesbare
+/// Projekt-Config (Terminal außerhalb ai-central) gelten die
+/// Registry-Defaults — die Tools erscheinen, ihre Aufrufe scheitern dann wie
+/// bisher an der fehlenden Env.
+fn active_modules() -> Vec<&'static crate::domain::modules::ModuleDesc> {
+  let project = std::env::var("AI_CENTRAL_PROJECT").unwrap_or_default();
+  crate::domain::modules::active_in(&crate::domain::paths::Paths::real(), &project)
+    .unwrap_or_else(|_| {
+      crate::domain::modules::MODULES
+        .iter()
+        .filter(|m| m.default_enabled)
+        .collect()
+    })
+}
+
+/// MCP-Definition eines Tools. Welche davon gelistet werden, entscheidet die
+/// Modul-Registry (active_modules); jeder Name aus MODULES muss hier einen
+/// Arm haben.
+fn tool_def(name: &str) -> Value {
+  match name {
+    "write_panel" => json!({
           "name": "write_panel",
           "description":
             "Legt einen längeren Entwurf (ADR, E-Mail, Dokument, Spezifikation, \
-             Commit-Message, Textbaustein) im ai-control-Panel neben dem Terminal \
+             Commit-Message, Textbaustein) im ai-central-Panel neben dem Terminal \
              ab, wo er mit der Maus selektierbar und über einen Button kopierbar \
              ist. Statt den Text zusätzlich als Fließtext auszugeben, dieses Tool \
              aufrufen und im Chat nur kurz bestätigen. Für eine bestehende Datei \
@@ -86,12 +120,12 @@ fn handle(method: &str, req: &Value) -> Option<Value> {
               }
             },
           },
-        },
-        {
+        }),
+    "write_commands" => json!({
           "name": "write_commands",
           "description":
             "Listet Shell-Befehle, die der Nutzer ausführen soll, als kopierbare \
-             Kacheln im ai-control-Panel. IMMER nutzen, wenn ein Befehl für den \
+             Kacheln im ai-central-Panel. IMMER nutzen, wenn ein Befehl für den \
              Nutzer bestimmt ist — statt ihn als Codeblock in den Chat zu \
              schreiben; im Chat nur kurz einordnen. Die Befehle werden an die \
              Befehls-History der Session angehängt (flüchtig, startet mit \
@@ -120,17 +154,102 @@ fn handle(method: &str, req: &Value) -> Option<Value> {
             },
             "required": ["commands"],
           },
-        },
-        {
+        }),
+    "show_commands" => json!({
           "name": "show_commands",
           "description":
-            "Zeigt die Befehls-History im ai-control-Panel (Kachel-Ansicht mit \
+            "Zeigt die Befehls-History im ai-central-Panel (Kachel-Ansicht mit \
              allen bisher ausgegebenen Befehlen), ohne etwas anzuhängen. Nutzen, \
              wenn der Nutzer die Befehlsliste sehen will („zeig die Befehle“, \
              „zeige die Befehlsliste“).",
           "inputSchema": { "type": "object", "properties": {} },
-        },
-        {
+        }),
+    "show_commit" => json!({
+          "name": "show_commit",
+          "description":
+            "Öffnet den Commit-Dialog des Projekts als eigenes Fenster: alle \
+             Git-Repos des Projekts mit ihren geänderten Dateien, Diff und \
+             Push-Vorprüfung. Nutzen, wenn der Nutzer committen will („mach \
+             den Commit-Dialog auf“, /commit). `messages` füllt die \
+             Nachrichtenfelder vor — pro Repo einen eigenen Vorschlag aus \
+             dessen anstehenden Änderungen; der Nutzer kann sie im Dialog \
+             ändern.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "messages": {
+                "type": "array",
+                "description":
+                  "Je ein Vorschlag pro Repo mit Änderungen.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "repo": {
+                      "type": "string",
+                      "description":
+                        "Ordnername der Repo-Wurzel, wie ihn der Dialog links \
+                         zeigt (z. B. `ai-central`).",
+                    },
+                    "message": {
+                      "type": "string",
+                      "description":
+                        "Commit-Nachricht dieses Repos: eine Betreffzeile, \
+                         sachlich, was die Änderung dort tut.",
+                    },
+                  },
+                  "required": ["repo", "message"],
+                },
+              },
+            },
+          },
+        }),
+    "write_todos" => json!({
+          "name": "write_todos",
+          "description":
+            "Hängt Aufgaben an die persistente ToDo-Liste des Projekts an; \
+             sie erscheinen als Kacheln im ToDo-Tab des ai-central-Panels und \
+             überleben die Session. Nutzen, wenn der Nutzer etwas auf die \
+             ToDo-Liste setzen will („auf die Liste“, „als ToDo merken“). \
+             `due` optional als ISO-Datum YYYY-MM-DD — das Panel zeigt die \
+             Fälligkeit als Ampel.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "todos": {
+                "type": "array",
+                "description": "Aufgaben in Listenreihenfolge.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "description": "Die Aufgabe, knapp formuliert.",
+                    },
+                    "note": {
+                      "type": "string",
+                      "description": "Optionale Kurznotiz.",
+                    },
+                    "due": {
+                      "type": "string",
+                      "description": "Optionales Fälligkeitsdatum (YYYY-MM-DD).",
+                    }
+                  },
+                  "required": ["text"],
+                },
+              }
+            },
+            "required": ["todos"],
+          },
+        }),
+    "show_todos" => json!({
+          "name": "show_todos",
+          "description":
+            "Zeigt die ToDo-Liste im ai-central-Panel (Kachel-Ansicht), ohne \
+             etwas hinzuzufügen. Nutzen, wenn der Nutzer die ToDos sehen will \
+             („zeig die ToDos“).",
+          "inputSchema": { "type": "object", "properties": {} },
+        }),
+    "archive_panel" => json!({
           "name": "archive_panel",
           "description":
             "Archiviert den aktuell im Panel liegenden Entwurf dauerhaft als \
@@ -143,6 +262,12 @@ fn handle(method: &str, req: &Value) -> Option<Value> {
           "inputSchema": {
             "type": "object",
             "properties": {
+              "title": {
+                "type": "string",
+                "description":
+                  "Titel des Dokuments; ohne ihn gilt die erste Überschrift \
+                   des Entwurfs.",
+              },
               "folder": {
                 "type": "string",
                 "description":
@@ -160,8 +285,8 @@ fn handle(method: &str, req: &Value) -> Option<Value> {
               }
             },
           },
-        },
-        {
+        }),
+    "show_archive" => json!({
           "name": "show_archive",
           "description":
             "Zeigt die Archiv-Übersicht des Projekts als Wiki-Seite im Panel: \
@@ -178,8 +303,8 @@ fn handle(method: &str, req: &Value) -> Option<Value> {
               }
             },
           },
-        },
-        {
+        }),
+    "search_archive" => json!({
           "name": "search_archive",
           "description":
             "Volltext-Suche über das Panel-Archiv des Projekts (FTS5-Syntax: \
@@ -200,20 +325,27 @@ fn handle(method: &str, req: &Value) -> Option<Value> {
               }
             },
           },
-        },
-      ],
-    })),
-    "tools/call" => Some(call_tool(req)),
-    "ping" => Some(json!({})),
-    _ => None,
+        }),
+    other => unreachable!("tool_def ohne Definition: {other}"),
   }
 }
 
 fn call_tool(req: &Value) -> Value {
-  match req["params"]["name"].as_str().unwrap_or("") {
+  let name = req["params"]["name"].as_str().unwrap_or("");
+  // Guard für Sessions, deren Tool-Liste älter ist als die Projekt-Config:
+  // Tools mittlerweile abgeschalteter Module werden abgewiesen.
+  if let Some(m) = crate::domain::modules::by_tool(name) {
+    if !active_modules().iter().any(|a| a.id == m.id) {
+      return err(format!("Modul „{}“ ist in diesem Projekt abgeschaltet.", m.id));
+    }
+  }
+  match name {
     "write_panel" => call_write(req),
     "write_commands" => call_write_commands(req),
     "show_commands" => call_show_commands(),
+    "show_commit" => call_show_commit(req),
+    "write_todos" => call_write_todos(req),
+    "show_todos" => call_show_todos(),
     "archive_panel" => call_archive(req),
     "search_archive" => call_search(req),
     "show_archive" => call_show_archive(req),
@@ -232,16 +364,24 @@ fn err(text: String) -> Value {
 }
 
 /// Pfad aus der PTY-Umgebung; fehlt die Variable, läuft das Terminal
-/// außerhalb von ai-control.
+/// außerhalb von ai-central.
 fn env_path(var: &str) -> Result<String, Value> {
   std::env::var(var)
-    .map_err(|_| err(format!("{var} nicht gesetzt (Terminal außerhalb ai-control).")))
+    .map_err(|_| err(format!("{var} nicht gesetzt (Terminal außerhalb ai-central).")))
 }
 
-/// Schreibt Text in die Panel-Datei aus AI_CONTROL_PANEL.
+/// Schreibt Text in die Panel-Datei aus AI_CENTRAL_PANEL. Ein frischer
+/// Entwurf löst die Quell-Verknüpfung des Dokument-Tabs (`<panel>.source`,
+/// gesetzt beim Öffnen eines Archiv-Dokuments) — Edits gehören danach wieder
+/// nur dem Panel, nicht der zuletzt geöffneten Archiv-Datei.
 fn write_panel_text(text: &str) -> Result<(), Value> {
-  let path = env_path("AI_CONTROL_PANEL")?;
-  std::fs::write(&path, text).map_err(|e| err(format!("Panel-Datei nicht schreibbar: {e}")))
+  let path = env_path("AI_CENTRAL_PANEL")?;
+  std::fs::write(&path, text).map_err(|e| err(format!("Panel-Datei nicht schreibbar: {e}")))?;
+  match std::fs::remove_file(format!("{path}.source")) {
+    Ok(()) => Ok(()),
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+    Err(e) => Err(err(format!("Quell-Verknüpfung nicht gelöst: {e}"))),
+  }
 }
 
 fn call_write(req: &Value) -> Value {
@@ -253,7 +393,7 @@ fn call_write(req: &Value) -> Value {
   // Read-Permission-Modell von Claude Code nicht umgehen.
   let (text, ok_msg) = match args["path"].as_str() {
     Some(src) => {
-      let project = std::env::var("AI_CONTROL_PROJECT").unwrap_or_default();
+      let project = std::env::var("AI_CENTRAL_PROJECT").unwrap_or_default();
       let paths = crate::domain::paths::Paths::real();
       match crate::domain::project::read_for_panel_in(&paths, &project, src) {
         Ok(content) => (content, "Datei ins Panel geladen."),
@@ -288,7 +428,7 @@ fn call_write_commands(req: &Value) -> Value {
     }
   }
   let count = commands.as_array().map(Vec::len).unwrap_or(0);
-  let path = match env_path("AI_CONTROL_COMMANDS") {
+  let path = match env_path("AI_CENTRAL_COMMANDS") {
     Ok(path) => path,
     Err(e) => return e,
   };
@@ -316,11 +456,11 @@ fn call_write_commands(req: &Value) -> Value {
   }
 }
 
-/// Öffnet die Kachel-Ansicht, ohne der History etwas hinzuzufügen: mtime der
-/// History-Datei anfassen genügt — der Watcher im Terminal-Prozess meldet sie
-/// als `commands-update`, das Panel schaltet auf „Befehle“ um.
-fn call_show_commands() -> Value {
-  let path = match env_path("AI_CONTROL_COMMANDS") {
+/// Öffnet eine Kachel-Ansicht, ohne der Datei etwas hinzuzufügen: mtime
+/// anfassen genügt — der Watcher im Terminal-Prozess meldet die Datei als
+/// Update, das Panel schaltet auf den zugehörigen Tab um.
+fn touch_buffer(env: &str, ok_msg: &str, err_ctx: &str) -> Value {
+  let path = match env_path(env) {
     Ok(path) => path,
     Err(e) => return e,
   };
@@ -330,8 +470,106 @@ fn call_show_commands() -> Value {
     .open(&path)
     .and_then(|f| f.set_modified(std::time::SystemTime::now()));
   match res {
-    Ok(()) => ok("Befehls-History im Panel geöffnet.".into()),
-    Err(e) => err(format!("Command-History nicht erreichbar: {e}")),
+    Ok(()) => ok(ok_msg.into()),
+    Err(e) => err(format!("{err_ctx}: {e}")),
+  }
+}
+
+fn call_show_commands() -> Value {
+  touch_buffer(
+    "AI_CENTRAL_COMMANDS",
+    "Befehls-History im Panel geöffnet.",
+    "Command-History nicht erreichbar",
+  )
+}
+
+/// Öffnet den Commit-Dialog. Die Signaldatei trägt die Vorschläge als JSON
+/// (`[{"repo": …, "message": …}]`): der Watcher liefert ihren Inhalt mit dem
+/// Öffnen-Event, das Fenster verteilt sie auf die Repos. Ohne `messages`
+/// bleibt sie leer.
+fn call_show_commit(req: &Value) -> Value {
+  let path = match env_path("AI_CENTRAL_COMMIT") {
+    Ok(path) => path,
+    Err(e) => return e,
+  };
+  let content = match req["params"]["arguments"].get("messages") {
+    Some(m) => m.to_string(),
+    None => String::new(),
+  };
+  match std::fs::write(&path, content) {
+    Ok(()) => ok("Commit-Dialog geöffnet.".into()),
+    Err(e) => err(format!("Commit-Dialog nicht erreichbar: {e}")),
+  }
+}
+
+fn call_show_todos() -> Value {
+  touch_buffer(
+    "AI_CENTRAL_TODOS",
+    "ToDo-Liste im Panel geöffnet.",
+    "ToDo-Liste nicht erreichbar",
+  )
+}
+
+/// Prüft ein Fälligkeitsdatum: YYYY-MM-DD, Monat 01–12, Tag 01–31.
+pub(crate) fn valid_due(due: &str) -> bool {
+  let b = due.as_bytes();
+  if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+    return false;
+  }
+  let (y, m, d) = (
+    due[0..4].parse::<u16>(),
+    due[5..7].parse::<u8>(),
+    due[8..10].parse::<u8>(),
+  );
+  matches!((y, m, d), (Ok(_), Ok(m), Ok(d)) if (1..=12).contains(&m) && (1..=31).contains(&d))
+}
+
+/// Hängt ToDos an die persistente Liste (JSONL, ein ToDo pro Zeile); jedes
+/// bekommt eine stabile ID fürs Kachel-Löschen. Der Watcher zieht den neuen
+/// Stand als `todos-update` ins Panel.
+fn call_write_todos(req: &Value) -> Value {
+  let path = match env_path("AI_CENTRAL_TODOS") {
+    Ok(path) => path,
+    Err(e) => return e,
+  };
+  let Some(todos) = req["params"]["arguments"]["todos"].as_array() else {
+    return err("todos fehlt".into());
+  };
+  let ts = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .map(|d| d.as_secs())
+    .unwrap_or(0);
+  let mut out = String::new();
+  for todo in todos {
+    let text = todo["text"].as_str().unwrap_or("").trim();
+    if text.is_empty() {
+      return err("ToDo ohne text".into());
+    }
+    let mut rec = json!({
+      "id": uuid::Uuid::new_v4().to_string(),
+      "ts": ts,
+      "text": text,
+    });
+    if let Some(note) = todo["note"].as_str() {
+      rec["note"] = json!(note);
+    }
+    if let Some(due) = todo["due"].as_str() {
+      if !valid_due(due) {
+        return err(format!("ungültiges due-Datum: {due} (erwartet YYYY-MM-DD)"));
+      }
+      rec["due"] = json!(due);
+    }
+    out.push_str(&rec.to_string());
+    out.push('\n');
+  }
+  let res = std::fs::OpenOptions::new()
+    .create(true)
+    .append(true)
+    .open(&path)
+    .and_then(|mut f| std::io::Write::write_all(&mut f, out.as_bytes()));
+  match res {
+    Ok(()) => ok(format!("{} ToDo(s) auf der Liste.", todos.len())),
+    Err(e) => err(format!("ToDo-Liste nicht schreibbar: {e}")),
   }
 }
 
@@ -340,9 +578,10 @@ fn call_show_commands() -> Value {
 /// Projekts (additionalDirectories + Edit-Allow) — das bleibt der UI mit
 /// Nutzer-Dialog vorbehalten, nicht einem Tool-Argument des Modells.
 fn call_archive(req: &Value) -> Value {
-  let project = std::env::var("AI_CONTROL_PROJECT").unwrap_or_default();
+  let project = std::env::var("AI_CENTRAL_PROJECT").unwrap_or_default();
   let args = &req["params"]["arguments"];
   let meta = crate::domain::archive::ArchiveMeta {
+    title: args["title"].as_str().map(str::to_string),
     folder: args["folder"].as_str().map(str::to_string),
     description: args["description"].as_str().map(str::to_string),
     tags: args["tags"]
@@ -361,7 +600,7 @@ fn call_archive(req: &Value) -> Value {
 /// Archiv-Übersicht bzw. Schlagwort-Seite generieren und in den Wiki-Puffer
 /// schreiben — der Watcher zieht sie als Wiki-Ansicht ins Panel.
 fn call_show_archive(req: &Value) -> Value {
-  let project = std::env::var("AI_CONTROL_PROJECT").unwrap_or_default();
+  let project = std::env::var("AI_CENTRAL_PROJECT").unwrap_or_default();
   let home = match crate::domain::archive::require_archive_home(&project) {
     Ok(home) => home,
     Err(e) => return err(e),
@@ -371,7 +610,7 @@ fn call_show_archive(req: &Value) -> Value {
     Ok(page) => page,
     Err(e) => return err(e),
   };
-  let path = match env_path("AI_CONTROL_WIKI") {
+  let path = match env_path("AI_CENTRAL_WIKI") {
     Ok(path) => path,
     Err(e) => return e,
   };
@@ -391,7 +630,7 @@ fn call_show_archive(req: &Value) -> Value {
 /// Volltext-Suche übers Archiv: Treffer als JSON in die Suchtreffer-Datei
 /// (der Watcher zieht sie als Kacheln ins Panel) und als Text zurück an claude.
 fn call_search(req: &Value) -> Value {
-  let project = std::env::var("AI_CONTROL_PROJECT").unwrap_or_default();
+  let project = std::env::var("AI_CENTRAL_PROJECT").unwrap_or_default();
   let home = match crate::domain::archive::require_archive_home(&project) {
     Ok(home) => home,
     Err(e) => return err(e),
@@ -403,7 +642,7 @@ fn call_search(req: &Value) -> Value {
     Ok(hits) => hits,
     Err(e) => return err(format!("Suche fehlgeschlagen: {e}")),
   };
-  let search_path = match env_path("AI_CONTROL_SEARCH") {
+  let search_path = match env_path("AI_CENTRAL_SEARCH") {
     Ok(path) => path,
     Err(e) => return e,
   };

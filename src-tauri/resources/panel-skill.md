@@ -5,7 +5,7 @@ description: Beim Entwerfen längerer Texte (ADR, E-Mail, Dokument, Spezifikatio
 
 # Panel
 
-Claude Code läuft im TUI; sichtbarer Text lässt sich dort nicht sauber selektieren und kopieren. Die ai-control-App zeigt Inhalte in einem andockbaren Panel neben dem Terminal an — selektierbar, mit Copy-Buttons. Die Kanäle dahin sind die MCP-Tools `write_panel` und `write_commands` (Server `text-panel`).
+Claude Code läuft im TUI; sichtbarer Text lässt sich dort nicht sauber selektieren und kopieren. Die ai-central-App zeigt Inhalte in einem andockbaren Panel neben dem Terminal an — selektierbar, mit Copy-Buttons. Die Kanäle dahin sind die MCP-Tools `write_panel` und `write_commands` (Server `text-panel`).
 
 ## Entwürfe — `write_panel`
 
@@ -32,4 +32,4 @@ Soll das Panel ohne konkreten Inhalt geöffnet werden („mach das Panel auf", �
 
 ## Fallback
 
-Sind die Tools nicht verfügbar (Terminal außerhalb von ai-control), Text bzw. Befehle normal im Chat ausgeben.
+Sind die Tools nicht verfügbar (Terminal außerhalb von ai-central), Text bzw. Befehle normal im Chat ausgeben.

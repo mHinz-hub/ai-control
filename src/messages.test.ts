@@ -35,6 +35,7 @@ describe("Nachrichtentabellen", () => {
       "Name",
       "Theme",
       "Wiki",
+      "ToDo",
       "MD",
       "Autostart",
       "Input",
@@ -44,14 +45,14 @@ describe("Nachrichtentabellen", () => {
       "Cache ↓",
       "+ oAuth",
       "+ apiKey",
+      "+ ToDo",
       "System",
+      "Commit",
       "Terminal",
       "Terminal — {name}",
       ".desktop-Starter",
-      ".ai-control/ (Config + Icon)",
+      ".ai-central/ (Config + Icon)",
       "Archiv-Berechtigung in .claude/settings.json",
-      "Todo-Hook in .claude/settings.json",
-      "OFFENE-PUNKTE.md bei jedem Sessionstart einspielen",
     ]);
     const gleich = keys(messages.de).filter((k) => {
       const de = pick(messages.de, k);
@@ -77,7 +78,7 @@ describe("t()", () => {
   });
 
   it("lässt unbekannte Platzhalter stehen", () => {
-    expect(t("wiki.emptyTag", { falsch: "x" })).toBe("Keine Dokumente mit #{tag}.");
+    expect(t("search.noHits", { falsch: "x" })).toBe("Keine Treffer für {scope}");
   });
 
   it("gibt bei fehlendem Schlüssel den Pfad zurück", () => {
@@ -105,8 +106,8 @@ describe("applyI18n()", () => {
       <input data-i18n-placeholder="search.placeholder" />`;
     applyI18n();
     const btn = document.querySelector("button")!;
-    expect(btn.textContent).toBe("Wiki");
-    expect(btn.title).toBe("Archiv-Wiki");
+    expect(btn.textContent).toBe("Archiv");
+    expect(btn.title).toBe("Archiv-Notizen");
     expect(document.querySelectorAll("button")[1].getAttribute("aria-label")).toBe(
       "Schließen",
     );

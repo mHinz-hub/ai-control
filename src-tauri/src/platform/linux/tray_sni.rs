@@ -13,10 +13,10 @@ struct AiControlTray {
 
 impl ksni::Tray for AiControlTray {
   fn id(&self) -> String {
-    "ai-control".into()
+    "ai-central".into()
   }
   fn title(&self) -> String {
-    "aICentral".into()
+    "aiCentral".into()
   }
   fn icon_pixmap(&self) -> Vec<ksni::Icon> {
     self.icon.clone()

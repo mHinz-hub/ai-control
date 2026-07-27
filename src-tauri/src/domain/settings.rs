@@ -1,4 +1,4 @@
-//! App-eigene settings.json unter ~/.config/ai-control (nicht pool-/projektbezogen):
+//! App-eigene settings.json unter ~/.config/ai-central (nicht pool-/projektbezogen):
 //! claudeCommand, syncOnSessionEnd, poolSyncDir, terminalFontSize, spellcheckLang.
 
 use std::fs;

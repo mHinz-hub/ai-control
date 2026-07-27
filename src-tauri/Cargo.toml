@@ -1,10 +1,10 @@
 [package]
-name = "ai-control"
-version = "0.3.0"
+name = "ai-central"
+version = "0.4.0"
 description = "Pool- und Session-Verwaltung für Claude Code"
 authors = ["marcus.hinz"]
 license = "MIT"
-repository = "https://github.com/mHinz-hub/ai-control"
+repository = "https://github.com/mHinz-hub/ai-central"
 edition = "2021"
 rust-version = "1.77.2"
 
@@ -37,12 +37,15 @@ uuid = { version = "1", features = ["v4"] }
 # Volltext-Suche übers Panel-Archiv (SQLite FTS5, in-memory aus dem Baum gebaut).
 rusqlite = { version = "0.32", features = ["bundled"] }
 keyring = { version = "3", features = ["apple-native", "sync-secret-service", "windows-native"] }
+# ePub-Viewer: das Buch ist ein ZIP (deflate), sein Inhaltsverzeichnis und
+# seine Lesereihenfolge stehen als XML darin (OPF, Nav/NCX).
+zip = { version = "2", default-features = false, features = ["deflate"] }
+quick-xml = "0.37"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = "5"
 glib = "0.18"
 gtk = "0.18"
-rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
 ksni = "0.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]

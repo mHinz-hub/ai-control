@@ -1,4 +1,4 @@
-//! Pools: benannte Credential-Sets unter ~/.config/ai-control/pools/<id>.
+//! Pools: benannte Credential-Sets unter ~/.config/ai-central/pools/<id>.
 //! Jeder Pool-Ordner ist ein vollständiges CLAUDE_CONFIG_DIR (settings.json,
 //! CLAUDE.md, Panel-Skill, MCP-Registrierung); oauth-Credentials verwaltet
 //! claude selbst (Keychain), die App speichert keine Tokens.
@@ -81,9 +81,36 @@ fn reject_reference(paths: &Paths, pool: &str, was: &str) -> Result<(), String> 
 
 pub(crate) fn read_pool(paths: &Paths, pool: &str) -> Result<Pool, String> {
   let cfg_path = paths.pool_dir(pool).join(POOL_FILE);
-  let raw = fs::read_to_string(&cfg_path)
-    .map_err(|e| format!("{}: {e}", cfg_path.display()))?;
+  let raw = fs::read_to_string(&cfg_path).map_err(|e| match e.kind() {
+    // Ein Pool ohne pool.json ist kein Pool: entweder von Hand angelegt oder
+    // halb abgeräumt. Der nackte io-Fehler nennt nur den Pfad und lässt offen,
+    // was zu tun ist — die Anlage gehört in die Einstellungen.
+    std::io::ErrorKind::NotFound => format!(
+      "Pool „{pool}“ ist nicht initialisiert ({POOL_FILE} fehlt in {}) — \
+       bitte in den Einstellungen anlegen.",
+      paths.pool_dir(pool).display()
+    ),
+    _ => format!("{}: {e}", cfg_path.display()),
+  })?;
   serde_json::from_str(&raw).map_err(|e| format!("{}: {e}", cfg_path.display()))
+}
+
+/// IDs aller Pool-Ordner: Einträge unter pools/ mit pool.json. Beim ersten
+/// Pool existiert pools/ noch nicht — dann ist die Liste leer.
+fn pool_ids(paths: &Paths) -> Result<Vec<String>, String> {
+  let mut out = Vec::new();
+  if !paths.pools_dir().is_dir() {
+    return Ok(out);
+  }
+  for entry in
+    fs::read_dir(paths.pools_dir()).map_err(|e| format!("{}: {e}", paths.pools_dir().display()))?
+  {
+    let entry = entry.map_err(|e| format!("{}: {e}", paths.pools_dir().display()))?;
+    if entry.path().join(POOL_FILE).is_file() {
+      out.push(entry.file_name().to_string_lossy().into_owned());
+    }
+  }
+  Ok(out)
 }
 
 pub(crate) fn list_pools_in(
@@ -91,28 +118,15 @@ pub(crate) fn list_pools_in(
   store: &dyn ApikeyStore,
 ) -> Result<Vec<PoolInfo>, String> {
   let mut pools = Vec::new();
-  if !paths.pools_dir().is_dir() {
-    return Ok(pools);
-  }
-  let entries =
-    fs::read_dir(paths.pools_dir()).map_err(|e| format!("{}: {e}", paths.pools_dir().display()))?;
-  for entry in entries {
-    let entry = entry.map_err(|e| format!("{}: {e}", paths.pools_dir().display()))?;
-    let cfg_path = entry.path().join(POOL_FILE);
-    if !cfg_path.is_file() {
-      continue;
-    }
-    let raw = fs::read_to_string(&cfg_path).map_err(|e| format!("{}: {e}", cfg_path.display()))?;
-    let pool: Pool =
-      serde_json::from_str(&raw).map_err(|e| format!("{}: {e}", cfg_path.display()))?;
-    let id = entry.file_name().to_string_lossy().into_owned();
+  for id in pool_ids(paths)? {
+    let pool = read_pool(paths, &id)?;
     // oauth: Credentials liegen in claudes eigenem Keychain-Eintrag, dessen
     // Prüfung wäre ein security-Aufruf pro Pool im 3-s-Polling — immer true.
     // apikey: Store-Eintrag (nativer API-Call) oder Fallback-Datei.
     let has_credentials = match pool.credential_type.as_str() {
       "apikey" => {
         store.has(&id)?
-          || fs::read_to_string(entry.path().join(APIKEY_FILE))
+          || fs::read_to_string(paths.pool_dir(&id).join(APIKEY_FILE))
             .map(|s| !s.trim().is_empty())
             .unwrap_or(false)
       }
@@ -142,27 +156,12 @@ pub(crate) fn list_pools_in(
   Ok(pools)
 }
 
-/// (ID, Anzeigename) aller Pools. Beim ersten Pool existiert pools/ noch
-/// nicht — dann ist die Liste leer.
+/// (ID, Anzeigename) aller Pools.
 pub(crate) fn pool_names(paths: &Paths) -> Result<Vec<(String, String)>, String> {
-  let mut out = Vec::new();
-  if !paths.pools_dir().is_dir() {
-    return Ok(out);
-  }
-  for entry in
-    fs::read_dir(paths.pools_dir()).map_err(|e| format!("{}: {e}", paths.pools_dir().display()))?
-  {
-    let entry = entry.map_err(|e| format!("{}: {e}", paths.pools_dir().display()))?;
-    let cfg_path = entry.path().join(POOL_FILE);
-    if !cfg_path.is_file() {
-      continue;
-    }
-    let raw = fs::read_to_string(&cfg_path).map_err(|e| format!("{}: {e}", cfg_path.display()))?;
-    let pool: Pool =
-      serde_json::from_str(&raw).map_err(|e| format!("{}: {e}", cfg_path.display()))?;
-    out.push((entry.file_name().to_string_lossy().into_owned(), pool.name));
-  }
-  Ok(out)
+  pool_ids(paths)?
+    .into_iter()
+    .map(|id| read_pool(paths, &id).map(|p| (id, p.name)))
+    .collect()
 }
 
 /// Prüft den Anzeigenamen (gültig + noch nicht vergeben) und liefert den
@@ -175,10 +174,35 @@ fn check_new_pool(paths: &Paths, name: &str) -> Result<PathBuf, String> {
   Ok(paths.pool_dir(&uuid::Uuid::new_v4().to_string()))
 }
 
-fn write_pool_json(dir: &PathBuf, pool: &Pool) -> Result<(), String> {
+fn write_pool_json(dir: &std::path::Path, pool: &Pool) -> Result<(), String> {
   fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
   let raw = serde_json::to_string_pretty(pool).map_err(|e| e.to_string())?;
   crate::domain::write_atomic(&dir.join(POOL_FILE), &(raw + "\n"))
+}
+
+/// Gemeinsamer Abschluss der Pool-Anlage (apikey wie oauth): pool.json
+/// schreiben, bei konfiguriertem poolSyncDir die Runtime verlinken;
+/// liefert die Pool-ID.
+fn finish_pool_create(
+  paths: &Paths,
+  dir: &std::path::Path,
+  name: &str,
+  credential_type: &str,
+) -> Result<String, String> {
+  write_pool_json(
+    dir,
+    &Pool {
+      name: name.to_string(),
+      credential_type: credential_type.into(),
+      dir: None,
+      rest: Default::default(),
+    },
+  )?;
+  let id = dir.file_name().unwrap().to_string_lossy().into_owned();
+  if pool_sync_dir(paths).is_some() {
+    link_pool_runtime_in(paths, &id)?;
+  }
+  Ok(id)
 }
 
 /// Grundausstattung eines Pool-Ordners (= CLAUDE_CONFIG_DIR): settings.json
@@ -223,9 +247,10 @@ const PANEL_MCP_SERVER: &str = "text-panel";
 
 /// Freigaben für die Panel-MCP-Tools — damit die Aufrufe ohne Rückfrage
 /// laufen. Namensschema: `mcp__<server>__<tool>`.
-const PANEL_PERMISSIONS: [&str; 2] = [
+const PANEL_PERMISSIONS: [&str; 3] = [
   "mcp__text-panel__write_panel",
   "mcp__text-panel__write_commands",
+  "mcp__text-panel__show_commit",
 ];
 
 /// Schreibt/aktualisiert die Panel-Skill-Datei in einem Pool (überschreibt eine
@@ -240,46 +265,24 @@ fn install_panel_skill(pool_dir: &std::path::Path) {
 /// Frühere Panel-Freigaben (Bash- und alter MCP-Key), die aus den Pool-Settings
 /// entfernt werden.
 const STALE_PANEL_PERMISSIONS: [&str; 3] =
-  ["Bash(tee:*)", "Bash(cat:*)", "mcp__aicontrol__write_panel"];
+  ["Bash(tee:*)", "Bash(cat:*)", "mcp__aicentral__write_panel"];
 
 /// Trägt die MCP-Freigabe in die settings.json eines Pools ein und entfernt
 /// die alten Bash-Freigaben — idempotent, ohne sonstige Einträge zu verändern.
+/// Fehler (fehlende/kaputte Datei) bleiben bewusst still: das läuft beim
+/// App-Start über alle Pools, auch referenzierte fremde Verzeichnisse.
 fn ensure_panel_permission(pool_dir: &std::path::Path) {
   let sp = pool_dir.join("settings.json");
-  let Ok(raw) = fs::read_to_string(&sp) else {
-    return;
-  };
-  let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&raw) else {
-    return;
-  };
-  let Some(obj) = v.as_object_mut() else { return };
-  let Some(perms) = obj
-    .entry("permissions")
-    .or_insert_with(|| serde_json::json!({}))
-    .as_object_mut()
-  else {
-    return;
-  };
-  let Some(allow) = perms
-    .entry("allow")
-    .or_insert_with(|| serde_json::json!([]))
-    .as_array_mut()
-  else {
-    return;
-  };
-  let before = allow.clone();
-  allow.retain(|e| !e.as_str().is_some_and(|s| STALE_PANEL_PERMISSIONS.contains(&s)));
-  for perm in PANEL_PERMISSIONS {
-    if !allow.iter().any(|e| e.as_str() == Some(perm)) {
-      allow.push(serde_json::json!(perm));
+  let _ = crate::domain::update_settings_permissions(&sp, false, |perms| {
+    let allow = crate::domain::perm_array(perms, "allow")?;
+    allow.retain(|e| !e.as_str().is_some_and(|s| STALE_PANEL_PERMISSIONS.contains(&s)));
+    for perm in PANEL_PERMISSIONS {
+      if !allow.iter().any(|e| e.as_str() == Some(perm)) {
+        allow.push(serde_json::json!(perm));
+      }
     }
-  }
-  if *allow == before {
-    return; // nichts geändert
-  }
-  if let Ok(out) = serde_json::to_string_pretty(&v) {
-    let _ = crate::domain::write_atomic(&sp, &(out + "\n"));
-  }
+    Ok(())
+  });
 }
 
 /// Registriert den MCP-Server (dieses Binary mit `--mcp-panel`) in der
@@ -321,10 +324,10 @@ fn register_mcp_server(pool_dir: &std::path::Path) {
   };
   // Schon korrekt und kein Altkey -> nichts schreiben. `.claude.json` ist
   // claudes Live-State; wir fassen sie nur an, wenn der Eintrag fehlt/abweicht.
-  if servers.get("aicontrol").is_none() && servers.get(PANEL_MCP_SERVER) == Some(&desired) {
+  if servers.get("aicentral").is_none() && servers.get(PANEL_MCP_SERVER) == Some(&desired) {
     return;
   }
-  servers.remove("aicontrol"); // alter Key vor Umbenennung
+  servers.remove("aicentral"); // alter Key vor Umbenennung
   servers.insert(PANEL_MCP_SERVER.into(), desired);
   if let Ok(out) = serde_json::to_string_pretty(&v) {
     let _ = crate::domain::write_atomic(&cfg, &(out + "\n"));
@@ -423,11 +426,7 @@ pub(crate) fn create_apikey_pool_in(
     &dir,
     serde_json::json!({ "apiKeyHelper": crate::platform::apikey_helper_command(&dir, &id) }),
   )?;
-  write_pool_json(&dir, &Pool { name: name.to_string(), credential_type: "apikey".into(), dir: None, rest: Default::default() })?;
-  if pool_sync_dir(paths).is_some() {
-    link_pool_runtime_in(paths, &id)?;
-  }
-  Ok(id)
+  finish_pool_create(paths, &dir, name, "apikey")
 }
 
 /// Legt einen oauth-Pool an: Grundausstattung (leere settings.json + CLAUDE.md)
@@ -437,12 +436,7 @@ pub(crate) fn create_apikey_pool_in(
 pub(crate) fn create_oauth_pool_in(paths: &Paths, name: &str) -> Result<String, String> {
   let dir = check_new_pool(paths, name)?;
   init_pool_config(&dir, serde_json::json!({}))?;
-  write_pool_json(&dir, &Pool { name: name.to_string(), credential_type: "oauth".into(), dir: None, rest: Default::default() })?;
-  let id = dir.file_name().unwrap().to_string_lossy().into_owned();
-  if pool_sync_dir(paths).is_some() {
-    link_pool_runtime_in(paths, &id)?;
-  }
-  Ok(id)
+  finish_pool_create(paths, &dir, name, "oauth")
 }
 
 /// Legt einen Pool an, der auf ein bestehendes Config-Verzeichnis verweist —
@@ -524,9 +518,7 @@ pub(crate) fn delete_pool_in(
   name: &str,
 ) -> Result<(), String> {
   let dir = paths.pool_dir(name);
-  if !dir.join(POOL_FILE).is_file() {
-    return Err(format!("Pool nicht gefunden: {name}"));
-  }
+  // Fehlende pool.json scheitert hier — read_pool nennt den Pfad.
   if read_pool(paths, name)?.credential_type == "apikey" {
     store.delete(name)?;
   }
@@ -627,6 +619,22 @@ mod tests {
       .iter()
       .any(|v| v == "mcp__text-panel__write_panel"));
     assert!(ziel.join("skills").join("panel").join("SKILL.md").is_file());
+  }
+
+  /// Pool-Ordner ohne pool.json: die Meldung nennt den Pool und den Weg zur
+  /// Anlage, statt den io-Fehler durchzureichen.
+  #[test]
+  fn fehlende_pool_json_nennt_den_pool() {
+    let p = tmp_paths();
+    fs::create_dir_all(p.pool_dir("private")).unwrap();
+
+    let Err(fehler) = read_pool(&p, "private") else {
+      panic!("Pool ohne pool.json muss scheitern");
+    };
+
+    assert!(fehler.contains("private"), "{fehler}");
+    assert!(fehler.contains("nicht initialisiert"), "{fehler}");
+    assert!(!fehler.contains("os error"), "{fehler}");
   }
 
   /// Zeigt der Pool auf claudes Default-Verzeichnis, bleibt CLAUDE_CONFIG_DIR

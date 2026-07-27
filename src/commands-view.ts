@@ -7,13 +7,7 @@
 
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { storedLocale, t } from "./messages";
-
-
-/// Entfernt Bidi- und Zero-Width-Steuerzeichen (U+200B–200F, U+202A–202E,
-/// U+2060–2064, U+2066–2069, U+FEFF) aus Befehlstexten.
-function stripInvisibles(s: string): string {
-  return s.replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g, "");
-}
+import { copyAction, deleteAction, flash, renderTile, stripInvisibles } from "./tiles";
 
 interface CommandEntry {
   cmd: string;
@@ -40,45 +34,6 @@ function fmtTime(ts: number): string {
   return d.toDateString() === new Date().toDateString()
     ? hm
     : `${d.toLocaleDateString(loc)} ${hm}`;
-}
-
-/// Kurzes visuelles Feedback (copied/error) — der eine Flash-Helper fürs
-/// ganze Panel.
-export function flash(el: HTMLElement, cls: string, ms = 1200) {
-  el.classList.add(cls);
-  setTimeout(() => el.classList.remove(cls), ms);
-}
-
-/// Sichtbare Fehlermeldung im Panel: kurz eingeblendete Zeile oben rechts.
-export function panelToast(msg: string) {
-  const t = document.createElement("div");
-  t.className = "panel-toast";
-  t.textContent = msg;
-  document.body.append(t);
-  setTimeout(() => t.remove(), 5000);
-}
-
-function copyBtn(text: () => string): HTMLButtonElement {
-  const btn = document.createElement("button");
-  btn.className = "panel-btn cmd-copy";
-  btn.title = t("commands.copyOne");
-  btn.innerHTML =
-    '<svg width="14" height="14" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" /><path d="M10.5 3.2V3A1.5 1.5 0 0 0 9 1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.2" /></svg>';
-  btn.addEventListener("click", async () => {
-    await writeText(text());
-    flash(btn, "copied");
-  });
-  return btn;
-}
-
-function deleteBtn(onClick: () => void): HTMLButtonElement {
-  const btn = document.createElement("button");
-  btn.className = "panel-btn cmd-del";
-  btn.title = t("commands.removeOne");
-  btn.innerHTML =
-    '<svg width="14" height="14" viewBox="0 0 16 16"><path d="M2.5 4.5h11" /><path d="M5.5 4.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5" /><path d="M4 4.5l.7 8.6a1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9l.7-8.6" /></svg>';
-  btn.addEventListener("click", onClick);
-  return btn;
 }
 
 export function initCommandsView(
@@ -126,26 +81,23 @@ export function initCommandsView(
 
       cmds.forEach((entry) => {
         // Unsichtbare Steuerzeichen (Bidi, Zero-Width) aus Anzeige UND
-        // Kopie halten — sonst sieht der Nutzer einen anderen Befehl, als
-        // die Zwischenablage enthält. Der Lösch-Abgleich läuft weiter über
-        // den Original-String.
+        // Kopie halten (stripInvisibles); der Lösch-Abgleich läuft weiter
+        // über den Original-String.
         const visible = stripInvisibles(entry.cmd);
-        const tile = document.createElement("div");
-        tile.className = "cmd-tile";
-        const body = document.createElement("div");
-        body.className = "cmd-body";
-        const cmd = document.createElement("div");
-        cmd.className = "cmd-text";
-        cmd.textContent = visible;
-        body.append(cmd);
-        if (entry.note) {
-          const note = document.createElement("div");
-          note.className = "cmd-note";
-          note.textContent = entry.note;
-          body.append(note);
-        }
-        tile.append(body, copyBtn(() => visible), deleteBtn(() => onDelete(entry.id ?? "")));
-        block.append(tile);
+        block.append(
+          renderTile({
+            cls: "cmd-tile",
+            bodyCls: "cmd-body",
+            parts: [
+              { cls: "cmd-text", text: visible },
+              ...(entry.note ? [{ cls: "cmd-note", text: entry.note }] : []),
+            ],
+            actions: [
+              copyAction(t("commands.copyOne"), () => visible),
+              deleteAction(t("commands.removeOne"), () => onDelete(entry.id ?? "")),
+            ],
+          }),
+        );
       });
       container.append(block);
     }
@@ -165,40 +117,43 @@ export function initCommandsView(
   };
 }
 
-export type PanelMode = "draft" | "commands" | "search" | "wiki";
+export type PanelMode = string;
 
-const LABEL: { [m in PanelMode]: string } = {
-  draft: t("panel.tabDraft"),
-  commands: t("panel.tabCommands"),
-  search: t("panel.tabSearch"),
-  wiki: t("panel.tabWiki"),
-};
+/// Ein Tab im Modus-Umschalter; kommt aus der Modul-Registry (panel-wiring).
+export interface ModeTab {
+  mode: PanelMode;
+  btn: HTMLElement;
+  /// Content-Container des Tabs; null für den Entwurfs-Tab, dessen
+  /// Sichtbarkeit über draftEls läuft.
+  content: HTMLElement | null;
+  /// Titelzeilen-Text, wenn der Tab aktiv ist (der Entwurfs-Tab behält
+  /// seinen Dokument-Titel).
+  label: string;
+  onActivate?: () => void;
+}
 
-/// Vier Tabs Entwurf / Befehle / Suche / Wiki: blenden Entwurfs-Inhalt samt
+/// Modus-Umschalter über die Tabs der Registry: blendet Entwurfs-Inhalt samt
 /// zugehöriger Kopf-Controls gegen die jeweilige Ansicht aus. Ein Wechsel bei
 /// offener Inhalts-Bearbeitung speichert den Entwurf (flush) statt zu
 /// blockieren.
 export function initPanelMode(opts: {
-  tabsEl: HTMLElement;
+  tabs: ModeTab[];
   draftEls: HTMLElement[];
-  commandsContent: HTMLElement;
-  searchContent: HTMLElement;
-  wikiContent: HTMLElement;
   titleEl: HTMLElement;
   flush: () => void;
 }) {
   // `null` = kein Tab aktiv (Panel zugeklappt).
   let mode: PanelMode | null = "draft";
   let draftTitle = "";
-  const tabs = [...opts.tabsEl.querySelectorAll<HTMLElement>("[data-mode]")];
 
   function apply() {
-    opts.commandsContent.hidden = mode !== "commands";
-    opts.searchContent.hidden = mode !== "search";
-    opts.wikiContent.hidden = mode !== "wiki";
+    for (const tab of opts.tabs) {
+      if (tab.content) tab.content.hidden = mode !== tab.mode;
+      tab.btn.classList.toggle("active", tab.mode === mode);
+    }
     for (const el of opts.draftEls) el.hidden = mode !== "draft";
-    for (const t of tabs) t.classList.toggle("active", t.dataset.mode === mode);
-    if (mode && mode !== "draft") opts.titleEl.textContent = LABEL[mode];
+    const active = opts.tabs.find((tab) => tab.mode === mode);
+    if (mode && mode !== "draft" && active) opts.titleEl.textContent = active.label;
   }
 
   function to(m: PanelMode) {
@@ -215,10 +170,15 @@ export function initPanelMode(opts: {
   function clear() {
     if (mode === "draft") draftTitle = opts.titleEl.textContent || t("panel.tabDraft");
     mode = null;
-    for (const t of tabs) t.classList.remove("active");
+    for (const tab of opts.tabs) tab.btn.classList.remove("active");
   }
 
-  for (const t of tabs) t.addEventListener("click", () => to(t.dataset.mode as PanelMode));
+  for (const tab of opts.tabs) {
+    tab.btn.addEventListener("click", () => {
+      to(tab.mode);
+      tab.onActivate?.();
+    });
+  }
   apply();
   return { to, clear, current: () => mode };
 }

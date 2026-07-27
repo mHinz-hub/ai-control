@@ -17,7 +17,7 @@ static N: AtomicU32 = AtomicU32::new(0);
 /// echten System.
 pub(crate) fn tmp_paths() -> Paths {
   let dir = std::env::temp_dir().join(format!(
-    "ai-control-test-{}-{}",
+    "ai-central-test-{}-{}",
     std::process::id(),
     N.fetch_add(1, Ordering::SeqCst)
   ));
@@ -75,7 +75,7 @@ pub(crate) fn make_apikey_pool(
   create_apikey_pool_in(p, store, name, key, true).unwrap()
 }
 
-/// Minimal-Projekt: Ordner mit .claude/, .ai-control/config.json und
+/// Minimal-Projekt: Ordner mit .claude/, .ai-central/config.json und
 /// Registry-Eintrag. Die Projekt-ID ist der Name — Tests adressieren das
 /// Projekt damit direkt, ohne UUID-Variablen durchzureichen.
 pub(crate) fn create_project(paths: &Paths, name: &str) -> Result<(), String> {
@@ -86,10 +86,10 @@ pub(crate) fn create_project(paths: &Paths, name: &str) -> Result<(), String> {
   }
   fs::create_dir_all(dir.join(".claude"))
     .map_err(|e| format!("{}: {e}", dir.join(".claude").display()))?;
-  fs::create_dir_all(dir.join(".ai-control"))
-    .map_err(|e| format!("{}: {e}", dir.join(".ai-control").display()))?;
+  fs::create_dir_all(dir.join(".ai-central"))
+    .map_err(|e| format!("{}: {e}", dir.join(".ai-central").display()))?;
   fs::write(
-    dir.join(".ai-control").join("config.json"),
+    dir.join(".ai-central").join("config.json"),
     format!("{{\"id\": \"{name}\", \"name\": \"{name}\"}}\n"),
   )
   .map_err(|e| e.to_string())?;

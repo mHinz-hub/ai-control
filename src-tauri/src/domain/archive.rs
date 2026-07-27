@@ -60,39 +60,18 @@ pub(crate) fn add_archive_permission(
   dir: &str,
 ) -> Result<(), String> {
   let sp = settings_path(&project_dir(paths, project)?);
-  let mut v: serde_json::Value = if sp.is_file() {
-    serde_json::from_str(&fs::read_to_string(&sp).map_err(|e| format!("{}: {e}", sp.display()))?)
-      .map_err(|e| format!("{}: {e}", sp.display()))?
-  } else {
-    serde_json::json!({})
-  };
-  let root = v.as_object_mut().ok_or("settings.json ist kein Objekt")?;
-  let perms = root
-    .entry("permissions")
-    .or_insert_with(|| serde_json::json!({}))
-    .as_object_mut()
-    .ok_or("permissions ist kein Objekt")?;
-  let dirs = perms
-    .entry("additionalDirectories")
-    .or_insert_with(|| serde_json::json!([]))
-    .as_array_mut()
-    .ok_or("additionalDirectories ist kein Array")?;
-  if !dirs.iter().any(|d| d.as_str() == Some(dir)) {
-    dirs.push(serde_json::json!(dir));
-  }
-  let edit = format!("Edit({dir}/**)");
-  let allow = perms
-    .entry("allow")
-    .or_insert_with(|| serde_json::json!([]))
-    .as_array_mut()
-    .ok_or("allow ist kein Array")?;
-  if !allow.iter().any(|p| p.as_str() == Some(&edit)) {
-    allow.push(serde_json::json!(edit));
-  }
-  let parent = sp.parent().ok_or("settings.json ohne Elternordner")?;
-  fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-  let raw = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
-  crate::domain::write_atomic(&sp, &(raw + "\n"))
+  crate::domain::update_settings_permissions(&sp, true, |perms| {
+    let dirs = crate::domain::perm_array(perms, "additionalDirectories")?;
+    if !dirs.iter().any(|d| d.as_str() == Some(dir)) {
+      dirs.push(serde_json::json!(dir));
+    }
+    let edit = format!("Edit({dir}/**)");
+    let allow = crate::domain::perm_array(perms, "allow")?;
+    if !allow.iter().any(|p| p.as_str() == Some(&edit)) {
+      allow.push(serde_json::json!(edit));
+    }
+    Ok(())
+  })
 }
 
 /// Wechselt das Archiv-Home: neues Home setzen (validieren, anlegen, Rechte,
@@ -186,26 +165,23 @@ pub(crate) fn remove_archive_permission(
   if !sp.is_file() {
     return Ok(());
   }
-  let mut v: serde_json::Value =
-    serde_json::from_str(&fs::read_to_string(&sp).map_err(|e| format!("{}: {e}", sp.display()))?)
-      .map_err(|e| format!("{}: {e}", sp.display()))?;
-  let Some(perms) = v.get_mut("permissions").and_then(|p| p.as_object_mut()) else {
-    return Ok(());
-  };
-  if let Some(dirs) = perms.get_mut("additionalDirectories").and_then(|d| d.as_array_mut()) {
-    dirs.retain(|d| d.as_str() != Some(dir));
-  }
-  let edit = format!("Edit({dir}/**)");
-  if let Some(allow) = perms.get_mut("allow").and_then(|a| a.as_array_mut()) {
-    allow.retain(|p| p.as_str() != Some(&edit));
-  }
-  let raw = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
-  crate::domain::write_atomic(&sp, &(raw + "\n"))
+  crate::domain::update_settings_permissions(&sp, false, |perms| {
+    if let Some(dirs) = perms.get_mut("additionalDirectories").and_then(|d| d.as_array_mut()) {
+      dirs.retain(|d| d.as_str() != Some(dir));
+    }
+    let edit = format!("Edit({dir}/**)");
+    if let Some(allow) = perms.get_mut("allow").and_then(|a| a.as_array_mut()) {
+      allow.retain(|p| p.as_str() != Some(&edit));
+    }
+    Ok(())
+  })
 }
 
 /// Metadaten beim Archivieren: Unterordner im Archiv-Home plus Frontmatter-Felder.
 #[derive(Default)]
 pub(crate) struct ArchiveMeta {
+  /// Titel aus dem Archiv-Formular; ohne ihn gilt die erste Überschrift.
+  pub(crate) title: Option<String>,
   /// Unterordner relativ zum Archiv-Home (wird angelegt).
   pub(crate) folder: Option<String>,
   /// Einzeiler fürs Frontmatter.
@@ -246,7 +222,7 @@ pub(crate) fn archive_panel_content(
     .map_err(|e| e.to_string())?
     .as_secs();
   let (stamp, iso) = utc_stamp(secs);
-  let title = first_line(&text);
+  let title = meta.title.clone().unwrap_or_else(|| first_line(&text));
   let (path, mut file) = create_unique(&dir, &stamp, &slugify(&title))?;
   // Frontmatter trägt den Anzeigenamen, nicht die Projekt-ID.
   let name = crate::domain::project::display_name_in(&Paths::real(), project)?;
@@ -301,9 +277,15 @@ fn check_folder(folder: &str) -> Result<&std::path::Path, String> {
 /// YAML-Frontmatter des Archiv-Dokuments inklusive optionaler
 /// description/tags aus den Metadaten. Gegenstück: `parse_frontmatter` unten —
 /// Schreiber und Leser des Formats leben bewusst im selben Modul.
-fn frontmatter(title: &str, project: &str, iso: &str, meta: &ArchiveMeta) -> String {
+pub(crate) fn frontmatter(
+  title: &str,
+  project: &str,
+  iso: &str,
+  meta: &ArchiveMeta,
+) -> String {
   let mut fm = format!(
-    "---\ntitle: \"{}\"\nproject: {project}\ncreated: {iso}\nsource: ai-control\n",
+    "---\nid: {}\ntitle: \"{}\"\nproject: {project}\ncreated: {iso}\nsource: ai-central\n",
+    uuid::Uuid::new_v4(),
     title.replace('"', "'"),
   );
   if let Some(d) = &meta.description {
@@ -385,6 +367,12 @@ pub(crate) fn strip_stamp(stem: &str) -> &str {
 }
 
 /// Titelzeile: erste Überschrift (## …) oder sonst erste nicht-leere Zeile.
+/// Titel des aktuellen Panel-Entwurfs (erste Überschrift bzw. erste Zeile) —
+/// Vorbelegung für das Titel-Feld im Archiv-Formular.
+pub(crate) fn panel_title(project: &str) -> String {
+  first_line(&fs::read_to_string(panel_file(project)).unwrap_or_default())
+}
+
 fn first_line(text: &str) -> String {
   let mut fallback: Option<&str> = None;
   for line in text.lines() {
@@ -424,8 +412,18 @@ pub(crate) fn slugify(s: &str) -> String {
   }
 }
 
+/// Aktuelle UTC-Zeit als ISO-String — Frontmatter-`created` neu angelegter
+/// Dokumente.
+pub(crate) fn utc_now_iso() -> Result<String, String> {
+  let secs = SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .map_err(|e| e.to_string())?
+    .as_secs();
+  Ok(utc_stamp(secs).1)
+}
+
 /// UTC aus Epoch-Sekunden: (Dateistempel `YYYY-MM-DD_HHMM`, ISO `…Z`).
-fn utc_stamp(secs: u64) -> (String, String) {
+pub(crate) fn utc_stamp(secs: u64) -> (String, String) {
   let (h, mi, s) = (secs / 3600 % 24, secs / 60 % 60, secs % 60);
   let (y, m, d) = civil_from_days((secs / 86400) as i64);
   (
@@ -507,6 +505,7 @@ mod tests {
   #[test]
   fn frontmatter_und_parser_roundtrip() {
     let meta = ArchiveMeta {
+      title: None,
       folder: None,
       description: Some("Kurz".into()),
       tags: vec!["adr".into(), "infra".into()],
@@ -553,11 +552,14 @@ mod tests {
   fn frontmatter_mit_und_ohne_meta() {
     let leer = ArchiveMeta::default();
     let fm = frontmatter("Titel", "proj", "2026-07-19T10:00:00Z", &leer);
-    assert!(fm.starts_with("---\ntitle: \"Titel\"\n"));
+    // Erste Zeile ist die technische ID, dann der Titel.
+    assert!(fm.starts_with("---\nid: "));
+    assert!(fm.contains("\ntitle: \"Titel\"\n"));
     assert!(!fm.contains("description:"));
     assert!(!fm.contains("tags:"));
 
     let voll = ArchiveMeta {
+      title: None,
       folder: None,
       description: Some("Kurz \"zitiert\"".into()),
       tags: vec!["archiv".into(), "wiki".into()],

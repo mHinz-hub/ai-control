@@ -125,7 +125,7 @@ pub(crate) fn main_builder() -> tauri::Builder<tauri::Wry> {
       #[cfg(target_os = "macos")]
       app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-      // Alt-Layout migrieren: ai-control.json → .ai-control/config.json,
+      // Alt-Layout migrieren: ai-central.json → .ai-central/config.json,
       // Pool-Zuordnung in die Registry, Icons in den Projekt-Config-Ordner.
       crate::domain::project::migrate_layout_in(&Paths::real())?;
 
@@ -143,7 +143,7 @@ pub(crate) fn main_builder() -> tauri::Builder<tauri::Wry> {
       // Fenster im Code statt in tauri.conf.json, damit der Terminal-Prozess
       // (gleiches Binary, gleiche Config) kein main-Fenster anlegt.
       let main_win = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
-        .title("aICentral")
+        .title("aiCentral")
         .inner_size(800.0, 600.0)
         // Fenster-Icon (_NET_WM_ICON) — deckt X11-DEs wie XFCE direkt ab,
         // unabhängig von der .desktop-Zuordnung; auf Windows das Titel-/Taskbar-Icon.
@@ -164,7 +164,7 @@ pub(crate) fn main_builder() -> tauri::Builder<tauri::Wry> {
       // Rahmenloses Popup-Fenster — dieselbe Optik auf allen Plattformen. Nur
       // der Weg zum Klick unterscheidet sich (platform::init_tray).
       tauri::WebviewWindowBuilder::new(app, "popup", tauri::WebviewUrl::App("popup.html".into()))
-        .title("ai-control-popup")
+        .title("ai-central-popup")
         .inner_size(320.0, 300.0)
         .decorations(false)
         .visible(false)
@@ -272,8 +272,6 @@ fn invoke_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send +
     commands::set_terminal_config,
     commands::project_icon,
     commands::pool_label,
-    commands::todo_state,
-    commands::set_todo,
     commands::usage_stats,
     commands::stop_project,
     commands::restart_project,
@@ -290,27 +288,46 @@ fn invoke_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send +
     commands::set_apikey,
     commands::panel_archive_dir_cmd,
     commands::panel_archive_cmd,
+    commands::panel_title_cmd,
     commands::set_archive_home_cmd,
     commands::change_archive_home_cmd,
     commands::clear_archive_home_cmd,
     commands::archive_docs_cmd,
     commands::reveal_path_cmd,
+    commands::git_repos,
+    commands::git_diff,
+    commands::git_push_check,
+    commands::git_commit,
     commands::spellcheck_lang,
+    commands::enabled_modules,
+    commands::module_registry,
+    commands::set_module,
     terminal::open_terminal,
     terminal::term_start,
     terminal::term_log,
     terminal::term_write,
     terminal::term_resize,
-    terminal::panel_read,
-    terminal::commands_read,
+    terminal::buffer_read,
     terminal::commands_delete,
+    terminal::todos_delete,
+    terminal::todos_add,
+    terminal::todos_update,
     terminal::panel_set,
-    terminal::search_read,
     terminal::search_run,
     terminal::panel_load,
-    terminal::wiki_read,
     terminal::wiki_open,
-    terminal::open_panel_window
+    terminal::archive_read,
+    terminal::epub_open,
+    terminal::archive_write,
+    terminal::archive_set_title,
+    terminal::archive_folders,
+    terminal::panel_save_as,
+    terminal::archive_delete,
+    terminal::archive_create_folder,
+    terminal::archive_create_doc,
+    terminal::archive_create_html,
+    terminal::open_panel_window,
+    terminal::open_commit_window
   ]
 }
 
@@ -320,6 +337,22 @@ pub(crate) fn terminal_builder(project: String) -> tauri::Builder<tauri::Wry> {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_clipboard_manager::init())
+    // Seiten der entpackten Bücher für den ePub-Viewer im Archiv-Fenster.
+    // Eigenes Protokoll statt des Asset-Protokolls: dessen Adressen tragen
+    // den ganzen Dateipfad als EIN kodiertes Segment, womit die relativen
+    // Verweise der Buchseiten (Bilder, CSS, Schriften) ins Leere liefen.
+    .register_uri_scheme_protocol("epub", |_ctx, request| {
+      match crate::domain::epub::serve(request.uri().path()) {
+        Ok((bytes, mime)) => tauri::http::Response::builder()
+          .header(tauri::http::header::CONTENT_TYPE, mime)
+          .body(bytes)
+          .unwrap(),
+        Err(e) => tauri::http::Response::builder()
+          .status(404)
+          .body(e.into_bytes())
+          .unwrap(),
+      }
+    })
     .manage(terminal::Terminals::default())
     .setup(move |app| {
       let cfg = project_config(&project)?;
@@ -335,6 +368,14 @@ pub(crate) fn terminal_builder(project: String) -> tauri::Builder<tauri::Wry> {
           use tauri::{Emitter, Manager};
           let _ = window.app_handle().emit("panel-window-closed", ());
         } else {
+          // Hauptfenster des Projekts zu: das Archiv-Fenster geht mit —
+          // sonst hielte es den Terminal-Prozess allein am Leben.
+          use tauri::Manager;
+          for (label, w) in window.app_handle().webview_windows() {
+            if label.starts_with("panel-") {
+              let _ = w.close();
+            }
+          }
           terminal::close(window);
         }
       }

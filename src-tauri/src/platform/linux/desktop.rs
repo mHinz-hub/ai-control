@@ -1,5 +1,5 @@
 //! Pro-Projekt-.desktop-Dateien: dash-to-dock/GNOME ordnen dem Fenster
-//! (app_id `aicontrol-<projekt-id>`, via set_prgname) darüber Icon und
+//! (app_id `aicentral-<projekt-id>`, via set_prgname) darüber Icon und
 //! Anzeigename des Projekts zu.
 
 use std::fs;
@@ -25,7 +25,7 @@ pub(crate) fn write_terminal_desktop(paths: &Paths, project: &str, cfg: &Project
   let exec = std::env::current_exe()
     .ok()
     .and_then(|p| p.to_str().map(str::to_string))
-    .unwrap_or_else(|| "ai-control".into());
+    .unwrap_or_else(|| "ai-central".into());
   let icon_line = cfg
     .terminal
     .icon
@@ -38,14 +38,14 @@ pub(crate) fn write_terminal_desktop(paths: &Paths, project: &str, cfg: &Project
   let name = cfg.name.as_deref().unwrap_or(project);
   let content = format!(
     "[Desktop Entry]\nType=Application\nName={name}\nExec={exec} --terminal {project}\n\
-     {icon_line}StartupWMClass=aicontrol-{project}\nNoDisplay=true\n"
+     {icon_line}StartupWMClass=aicentral-{project}\nNoDisplay=true\n"
   );
-  let _ = fs::write(dir.join(format!("aicontrol-{project}.desktop")), content);
+  let _ = fs::write(dir.join(format!("aicentral-{project}.desktop")), content);
 }
 
 /// Entfernt die .desktop eines Projekts (beim Löschen).
 pub(crate) fn remove_terminal_desktop(paths: &Paths, project: &str) {
-  let _ = fs::remove_file(applications_dir(paths).join(format!("aicontrol-{project}.desktop")));
+  let _ = fs::remove_file(applications_dir(paths).join(format!("aicentral-{project}.desktop")));
 }
 
 /// Beim App-Start: für jedes registrierte Projekt die .desktop neu schreiben und
@@ -65,7 +65,7 @@ pub(crate) fn sync_all_desktops(paths: &Paths) {
       let name = e.file_name();
       let Some(name) = name.to_str() else { continue };
       if let Some(project) = name
-        .strip_prefix("aicontrol-")
+        .strip_prefix("aicentral-")
         .and_then(|n| n.strip_suffix(".desktop"))
       {
         if !reg.contains_key(project) {

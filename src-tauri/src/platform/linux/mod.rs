@@ -54,8 +54,8 @@ pub(crate) fn offer_move_to_applications(_paths: &crate::domain::paths::Paths) {
 
 // ---------- Desktop-Erkennung ----------
 
-/// GNOME-Session? (XDG_CURRENT_DESKTOP enthält „GNOME"). Steuert
-/// AppImage-Sperre und Extension-Aktivierung.
+/// GNOME-Session? (XDG_CURRENT_DESKTOP enthält „GNOME"). Steuert die
+/// Extension-Aktivierung.
 pub(crate) fn is_gnome() -> bool {
   std::env::var("XDG_CURRENT_DESKTOP")
     .map(|d| d.to_uppercase().contains("GNOME"))
@@ -108,7 +108,7 @@ pub(crate) fn init_tray(app: &tauri::AppHandle, cb: TrayCallbacks) -> Result<(),
     // Die Extension liegt systemweit (aus dem Paket), aktiviert wird sie pro
     // Benutzer in dconf — das erledigt die im Benutzerkontext laufende App.
     let _ = Command::new("gnome-extensions")
-      .args(["enable", "ai-control-popup@local"])
+      .args(["enable", "ai-central-popup@local"])
       .status();
     gnome::spawn_dbus_service(app.clone(), cb);
   } else {

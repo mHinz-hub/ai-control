@@ -12,7 +12,7 @@ pub(super) fn enable_script() {
       "--group",
       "Plugins",
       "--key",
-      "ai-control-popupEnabled",
+      "ai-central-popupEnabled",
       "true",
     ])
     .status();

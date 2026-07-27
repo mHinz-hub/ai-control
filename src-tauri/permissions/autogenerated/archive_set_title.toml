@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-archive-set-title"
+description = "Enables the archive_set_title command without any pre-configured scope."
+commands.allow = ["archive_set_title"]
+
+[[permission]]
+identifier = "deny-archive-set-title"
+description = "Denies the archive_set_title command without any pre-configured scope."
+commands.deny = ["archive_set_title"]

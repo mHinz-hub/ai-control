@@ -10,7 +10,7 @@ struct PopupService {
   cb: TrayCallbacks,
 }
 
-#[zbus::interface(name = "com.aicontrol.Popup1")]
+#[zbus::interface(name = "com.aicentral.Popup1")]
 impl PopupService {
   fn show(&self) {
     (self.cb.show)(&self.app, Anchor::Managed);
@@ -20,14 +20,14 @@ impl PopupService {
   }
 }
 
-/// Hält den D-Bus-Namen com.aicontrol.Popup, solange die App läuft — die
+/// Hält den D-Bus-Namen com.aicentral.Popup, solange die App läuft — die
 /// Extension zeigt ihren Panel-Button nur, wenn der Name präsent ist.
 pub(super) fn spawn_dbus_service(app: tauri::AppHandle, cb: TrayCallbacks) {
   std::thread::spawn(move || {
     let serve = move || -> zbus::Result<()> {
       let _conn = zbus::blocking::connection::Builder::session()?
-        .name("com.aicontrol.Popup")?
-        .serve_at("/com/aicontrol/Popup", PopupService { app, cb })?
+        .name("com.aicentral.Popup")?
+        .serve_at("/com/aicentral/Popup", PopupService { app, cb })?
         .build()?;
       loop {
         std::thread::park();

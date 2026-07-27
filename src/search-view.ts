@@ -1,12 +1,14 @@
 /// Kachel-Ansicht der Archiv-Suchtreffer: rendert die Suchtreffer-Datei
 /// (search_archive im MCP-Server) als klickbare Kacheln — Klick reicht den
-/// absoluten Pfad des Treffers an onOpen. Titel/Snippet/Pfad sind Fremdtext und
+/// absoluten Pfad und den relpath des Treffers an onOpen. Titel/Snippet/Pfad sind Fremdtext und
 /// gehen nie durch innerHTML; die `**…**`-Marker im Snippet werden per
 /// Split in <mark>-Elemente übersetzt.
 
 import { t } from "./messages";
+import { renderTile } from "./tiles";
 
 interface Hit {
+  id: string;
   relpath: string;
   title: string;
   snippet: string;
@@ -26,7 +28,7 @@ export interface SearchView {
 
 export function initSearchView(
   container: HTMLElement,
-  onOpen: (path: string) => void,
+  onOpen: (path: string, relpath: string, id: string) => void,
   onSearch: (query: string) => void,
 ): SearchView {
   let count = 0;
@@ -99,17 +101,17 @@ export function initSearchView(
       : t("search.noHits", { scope });
     results.append(head);
     for (const hit of run.hits) {
-      const tile = document.createElement("div");
-      tile.className = "hit-tile";
-      const title = document.createElement("div");
-      title.className = "hit-title";
-      title.textContent = hit.title;
-      const path = document.createElement("div");
-      path.className = "hit-path";
-      path.textContent = hit.relpath;
-      tile.append(title, snippetEl(hit.snippet), path);
-      tile.addEventListener("click", () => onOpen(`${run.home}/${hit.relpath}`));
-      results.append(tile);
+      results.append(
+        renderTile({
+          cls: "hit-tile",
+          parts: [
+            { cls: "hit-title", text: hit.title },
+            snippetEl(hit.snippet),
+            { cls: "hit-path", text: hit.relpath },
+          ],
+          onClick: () => onOpen(`${run.home}/${hit.relpath}`, hit.relpath, hit.id),
+        }),
+      );
     }
   }
 

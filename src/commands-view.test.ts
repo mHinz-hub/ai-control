@@ -16,18 +16,20 @@ function modeSetup() {
     <div id="sc" hidden></div>
     <div id="wc" hidden></div>`;
   const el = (id: string) => document.getElementById(id)!;
+  const tab = (m: string) =>
+    document.querySelector<HTMLElement>(`[data-mode="${m}"]`)!;
   const flush = vi.fn();
   const mode = initPanelMode({
-    tabsEl: el("tabs"),
+    tabs: [
+      { mode: "commands", btn: tab("commands"), content: el("cc"), label: "Befehle" },
+      { mode: "draft", btn: tab("draft"), content: null, label: "Dokument" },
+      { mode: "wiki", btn: tab("wiki"), content: el("wc"), label: "Wiki" },
+      { mode: "search", btn: tab("search"), content: el("sc"), label: "Suche" },
+    ],
     draftEls: [el("draft-el")],
-    commandsContent: el("cc"),
-    searchContent: el("sc"),
-    wikiContent: el("wc"),
     titleEl: el("title"),
     flush,
   });
-  const tab = (m: string) =>
-    document.querySelector<HTMLElement>(`[data-mode="${m}"]`)!;
   return { mode, flush, el, tab };
 }
 

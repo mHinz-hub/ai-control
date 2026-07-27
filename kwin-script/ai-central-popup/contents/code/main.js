@@ -6,7 +6,7 @@
 // Kein Drift: Fenster, UI und Verhalten kommen unverändert aus der App; hier
 // wird ausschließlich platziert.
 
-const WIN_TITLE = "ai-control-popup";
+const WIN_TITLE = "ai-central-popup";
 
 function place(w) {
   if (!w || w.caption !== WIN_TITLE) {

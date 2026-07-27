@@ -64,33 +64,42 @@ header {
 #project-icon[hidden] {
   display: none;
 }
+/* Datei-Knopf und Tab-Leiste sitzen rechts; das `auto` trägt der Knopf, damit
+   die Leiste auch dann rechts bleibt, wenn die Tabs ausgeblendet sind. */
+#term-files {
+  margin-left: auto;
+}
 /* Tab-Leiste im Header: Befehle │ Dokument · Wiki · Suche. */
 header .panel-tabs {
-  margin-left: auto;
+  margin-left: 4px;
 }
 header .panel-tabs[hidden] {
   display: none;
 }
-/* Ohne Tabs (Panel abgelöst) rückt das Pool-Badge selbst nach rechts. */
-header .panel-tabs[hidden] + #pool {
-  margin-left: auto;
+/* Pool-Badge steht links beim Titel, durch die Pipe abgesetzt; ohne Pool
+   verschwindet auch der Trenner. */
+#pool:empty,
+#pool-sep:has(+ #pool:empty) {
+  display: none;
 }
 .tab-sep {
-  width: 1px;
-  height: 16px;
-  background: var(--line-strong);
-  margin: 0 6px;
+  width: 2px;
+  height: 22px;
+  background: var(--accent);
+  opacity: 0.7;
+  border-radius: 1px;
+  margin: 0 12px;
   align-self: center;
 }
-#pool {
-  background: var(--line);
+/* Pool als schlichter Anhang: name@pool, ohne Chip; die negativen
+   Ränder heben das Header-gap (10px) auf — bündig am Namen. */
+#pool-sep {
   color: var(--muted);
-  border-radius: 999px;
-  padding: 4px 12px;
-  font-size: 11px;
+  margin-left: -10px;
 }
-#pool:empty {
-  display: none;
+#pool {
+  color: var(--muted);
+  margin-left: -10px;
 }
 /* Eigene Fensterknöpfe (Linux): rechtsbündig, volle Header-Höhe. */
 #winbtns {
@@ -98,9 +107,7 @@ header .panel-tabs[hidden] + #pool {
   display: flex;
   align-self: stretch;
 }
-#pool:empty + #winbtns {
-  margin-left: auto;
-}
+
 .winbtn {
   width: 44px;
   height: 100%;

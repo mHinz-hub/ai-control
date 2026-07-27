@@ -6,14 +6,8 @@
   </head>
   <body>
     <div class="panel-topbar" data-tauri-drag-region>
-      <div class="panel-tabs" id="panel-tabs">
-        <button class="panel-btn" data-mode="commands" data-i18n-title="panel.tabCommandsTitle" data-i18n="panel.tabCommands">Befehle</button>
-        <span class="tab-sep"></span>
-        <button class="panel-btn" data-mode="draft" data-i18n-title="panel.tabDraftTitle" data-i18n="panel.tabDraft">Dokument</button>
-        <button class="panel-btn" data-mode="wiki" data-i18n-title="panel.tabWikiTitle" data-i18n="panel.tabWiki">Wiki</button>
-        <button class="panel-btn" data-mode="search" data-i18n-title="panel.tabSearchTitle" data-i18n="panel.tabSearch">Suche</button>
-        <span class="tab-sep"></span>
-      </div>
+      <!-- Tabs kommen aus der Modul-Registry (panel-wiring). -->
+      <div class="panel-tabs" id="panel-tabs"></div>
       <button class="winbtn" id="panel-dock" data-i18n-title="panel.dock">
         <svg width="14" height="14" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" /><path d="M9.5 2.5v11" /><path d="M4 8h3.4M6 6.2 7.8 8 6 9.8" /></svg>
       </button>
@@ -57,10 +51,8 @@
         </button>
       </div>
     </div>
+    <!-- Modul-Container (<mode>-content) reihen sich hier ein. -->
     <div id="panel-content" class="md"></div>
-    <div id="commands-content" hidden></div>
-    <div id="search-content" hidden></div>
-    <div id="wiki-content" hidden></div>
     <div id="resize-grips" aria-hidden="true">
       <div class="grip n" data-dir="North"></div>
       <div class="grip s" data-dir="South"></div>

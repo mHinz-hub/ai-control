@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-archive-create-folder"
+description = "Enables the archive_create_folder command without any pre-configured scope."
+commands.allow = ["archive_create_folder"]
+
+[[permission]]
+identifier = "deny-archive-create-folder"
+description = "Denies the archive_create_folder command without any pre-configured scope."
+commands.deny = ["archive_create_folder"]

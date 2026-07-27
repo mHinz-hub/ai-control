@@ -9,7 +9,7 @@ use crate::domain::paths::Paths;
 /// Service-Name der Einträge; Account ist die Pool-ID. Unter Linux legt die
 /// keyring-Crate die Attribute service/username an — der apiKeyHelper liest
 /// mit denselben Attributen über secret-tool.
-pub(crate) const APIKEY_SERVICE: &str = "ai-control-apikey";
+pub(crate) const APIKEY_SERVICE: &str = "ai-central-apikey";
 
 /// Fehler-Sentinel an die UI: Store nicht verfügbar und Datei-Ablage (noch)
 /// nicht erlaubt — die UI fragt dann nach und wiederholt mit allow_file.
@@ -50,14 +50,18 @@ mod tests {
   use super::*;
   use std::path::PathBuf;
 
-  /// Referenzwert vom echten System: privateDefault → 096c4ef9
-  /// (verifiziert 2026-07-03 gegen den von claude angelegten Eintrag).
+  /// Referenzwert für privateDefault unter `~/.config/ai-central`.
+  ///
+  /// Der Suffix ist der Hash über den Pfad des Config-Verzeichnisses — die
+  /// Umbenennung von `ai-control` hat ihn deshalb mitgezogen (vorher
+  /// 096c4ef9). Wer den Ordner verschiebt, verliert den bestehenden Login,
+  /// solange der Keychain-Eintrag nicht mit umgezogen wird.
   #[test]
   fn keychain_service_suffix() {
     let p = Paths { home: PathBuf::from("/Users/marcus.hinz") };
     assert_eq!(
       keychain_service_for(&p, &p.pool_dir("privateDefault")),
-      "Claude Code-credentials-096c4ef9"
+      "Claude Code-credentials-1b1e81f0"
     );
   }
 
@@ -79,11 +83,11 @@ mod tests {
     assert!(cmd.ends_with("|| cat '/pools/abc/apikey'"));
     #[cfg(target_os = "macos")]
     assert!(cmd.starts_with(
-      "security find-generic-password -w -s ai-control-apikey -a abc 2>/dev/null"
+      "security find-generic-password -w -s ai-central-apikey -a abc 2>/dev/null"
     ));
     #[cfg(target_os = "linux")]
     assert!(cmd.starts_with(
-      "secret-tool lookup service ai-control-apikey username abc 2>/dev/null"
+      "secret-tool lookup service ai-central-apikey username abc 2>/dev/null"
     ));
   }
 }

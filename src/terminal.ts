@@ -15,7 +15,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { wirePanel } from "./panel-wiring";
 import { applyTheme, THEMES } from "./themes";
-import { flash, panelToast } from "./commands-view";
+import { flash, panelToast } from "./tiles";
 import { initArchiveForm } from "./archive-form";
 import { applyI18n, t } from "./messages";
 
@@ -76,6 +76,7 @@ document.querySelector("header")!.addEventListener("dblclick", (e) => {
 interface Project {
   id: string;
   name: string;
+  path: string;
   pool: string | null;
   terminal: { theme: string | null; icon: string | null; title: string | null };
 }
@@ -177,7 +178,9 @@ function b64ToBytes(b64: string): Uint8Array {
   return bytes;
 }
 
-await win.listen<string>("pty-output", (e) => term.write(b64ToBytes(e.payload)));
+await win.listen<string>("pty-output", (e) =>
+  term.write(b64ToBytes(e.payload)),
+);
 await win.listen("pty-exit", () =>
   term.write(`\r\n\x1b[90m${t("panel.processEnded")}\x1b[0m\r\n`),
 );
@@ -212,15 +215,39 @@ function hidePanel() {
 
 // Gemeinsame Verdrahtung (Views, Modi, Update-Events); jedes eingehende
 // Update blendet das angedockte Panel ein, solange es nicht abgelöst ist.
-const { view, mode } = await wirePanel(project, () => {
+const { view, views, mode } = await wirePanel(project, () => {
   hasContent = true;
   if (!detached) showPanel();
 });
-// Panel startet zugeklappt — kein Tab aktiv, bis eine Ansicht geöffnet wird.
-mode.clear();
+// Panel startet zugeklappt — außer das ToDo-Modul ist gewählt und die Liste
+// nicht leer: dann öffnet das Panel beim Start mit der ToDo-Ansicht.
+const todos = views.get("todo");
+if (todos && !todos.empty()) {
+  hasContent = true;
+  showPanel();
+  mode.to("todo");
+} else {
+  mode.clear();
+}
 
 // Tab-Klick im Header öffnet das (angedockte) Panel, falls es zu ist.
 const headerTabs = document.getElementById("panel-tabs")!;
+// Ausnahme Archiv & Suche: öffnen standardmäßig im eigenen Panel-Fenster
+// (Popup) statt in der schmalen angedockten Spalte — Capture-Phase, damit
+// weder der Modus-Wechsel des Tabs noch das Einblenden des Panels feuern.
+headerTabs.addEventListener(
+  "click",
+  (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>(
+      'button[data-mode="wiki"], button[data-mode="search"]',
+    );
+    if (!btn) return;
+    e.stopPropagation();
+    e.preventDefault();
+    void invoke("open_panel_window", { project, mode: btn.dataset.mode });
+  },
+  { capture: true },
+);
 headerTabs.addEventListener("click", () => {
   hasContent = true;
   if (!detached) showPanel();
@@ -246,9 +273,9 @@ await listen("panel-window-closed", () => {
   headerTabs.hidden = false;
 });
 
-document
-  .getElementById("panel-detach")!
-  .addEventListener("click", () => invoke("open_panel_window", { project }));
+// Ablösen gibt es nicht mehr — die Flächen sind fest verteilt; der Knopf
+// bleibt versteckt.
+document.getElementById("panel-detach")!.hidden = true;
 document.getElementById("panel-hide")!.addEventListener("click", () => {
   hidePanel();
   mode.clear();
@@ -257,41 +284,104 @@ document.getElementById("panel-hide")!.addEventListener("click", () => {
 // Archivieren: Button klappt das Formular (Ordner/Beschreibung/Schlagwörter)
 // auf; Abschicken wählt notfalls erst das Archiv-Home per Dialog.
 const archiveBtn = document.getElementById("panel-archive")!;
-const archiveForm = initArchiveForm(archiveBtn, async (meta) => {
-  try {
-    const configured = await invoke<string | null>("panel_archive_dir_cmd", {
-      project,
-    });
-    let dir: string | undefined;
-    if (!configured) {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const chosen = await open({ directory: true, title: t("panel.chooseArchiveDir") });
-      if (!chosen) return;
-      dir = chosen as string;
+const archiveForm = initArchiveForm(
+  archiveBtn,
+  async (meta) => {
+    try {
+      const configured = await invoke<string | null>("panel_archive_dir_cmd", {
+        project,
+      });
+      let dir: string | undefined;
+      if (!configured) {
+        const { open } = await import("@tauri-apps/plugin-dialog");
+        const chosen = await open({
+          directory: true,
+          title: t("panel.chooseArchiveDir"),
+        });
+        if (!chosen) return;
+        dir = chosen as string;
+      }
+      await view.flush(); // offene Bearbeitung erst speichern — archiviert, was zu sehen ist
+      await invoke<string>("panel_archive_cmd", {
+        project,
+        dir,
+        title: meta.title ?? null,
+        folder: meta.folder ?? null,
+        description: meta.description ?? null,
+        tags: meta.tags,
+      });
+      flash(archiveBtn, "copied", 1400);
+    } catch (e) {
+      flash(archiveBtn, "error", 1400);
+      panelToast(`Archivieren fehlgeschlagen: ${e}`);
+      invoke("term_log", { msg: `archive: ${e}` });
     }
-    await view.flush(); // offene Bearbeitung erst speichern — archiviert, was zu sehen ist
-    const path = await invoke<string>("panel_archive_cmd", {
-      project,
-      dir,
-      folder: meta.folder ?? null,
-      description: meta.description ?? null,
-      tags: meta.tags,
-    });
-    flash(archiveBtn, "copied", 1400);
-    invoke("reveal_path_cmd", { path });
-  } catch (e) {
-    flash(archiveBtn, "error", 1400);
-    panelToast(`Archivieren fehlgeschlagen: ${e}`);
-    invoke("term_log", { msg: `archive: ${e}` });
-  }
-});
+  },
+  {
+    // Ordner-Vorschläge aus dem Archiv; „Auf Platte legen" schreibt den
+    // Entwurf an einen frei gewählten Pfad (ohne Archiv, ohne Frontmatter).
+    folders: () => invoke("archive_folders", { project }),
+    title: () => invoke("panel_title_cmd", { project }),
+    onSave: async () => {
+      try {
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        const path = await save({
+          title: t("archiveForm.saveTitle"),
+          defaultPath: "entwurf.md",
+        });
+        if (!path) return;
+        await view.flush();
+        await invoke("panel_save_as", { project, path });
+        flash(archiveBtn, "copied", 1400);
+      } catch (e) {
+        flash(archiveBtn, "error", 1400);
+        panelToast(`Speichern fehlgeschlagen: ${e}`);
+      }
+    },
+  },
+);
 archiveBtn.addEventListener("click", () => archiveForm.toggle());
+
+// Datei-Knopf im Header: die gewählten Pfade gehen als Text ins Prompt der
+// laufenden Session — gedacht für den gelegentlichen Fall, dass eine Datei
+// genannt werden soll, ohne sie abzutippen. Der Knopf sitzt im Terminal-Fenster,
+// weil `term_write` die PTY über das Fensterlabel adressiert (terminal.rs:852).
+// Pfade unterhalb des Projektordners werden relativ eingesetzt, Pfade mit
+// Leerzeichen in Anführungszeichen.
+document.getElementById("term-files")!.addEventListener("click", async () => {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const chosen = await open({
+    multiple: true,
+    defaultPath: cfg?.path,
+    title: t("panel.pickFiles"),
+  });
+  if (!chosen) return;
+  const root = cfg?.path.replace(/\/$/, "");
+  const text = (chosen as string[])
+    .map((p) =>
+      root && p.startsWith(`${root}/`) ? p.slice(root.length + 1) : p,
+    )
+    .map((p) => (/\s/.test(p) ? `"${p}"` : p))
+    .join(" ");
+  await invoke("term_write", { data: `${text} ` });
+  term.focus();
+});
+
+// Commit-Dialog: die Session ruft `show_commit` auf, der Watcher meldet die
+// angefasste Signaldatei hier — das Terminal-Fenster öffnet daraufhin das
+// Fenster. Ein eigener Knopf im Header entfällt.
+await listen("commit-open", () => {
+  void invoke("open_commit_window", { project });
+});
 
 // Splitter: Panelbreite ziehen.
 splitter.addEventListener("mousedown", (e) => {
   e.preventDefault();
   const move = (ev: MouseEvent) => {
-    const w = Math.max(240, Math.min(window.innerWidth - 200, window.innerWidth - ev.clientX));
+    const w = Math.max(
+      240,
+      Math.min(window.innerWidth - 200, window.innerWidth - ev.clientX),
+    );
     panel.style.width = `${w}px`;
     fit.fit();
   };

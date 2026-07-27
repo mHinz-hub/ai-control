@@ -1,6 +1,6 @@
 //! Projekte: Anlage (Wizard), Registry-Aufnahme, Arbeitsordner, Pool-Zuordnung,
 //! Terminal-Einstellungen, Löschen. Der Projektordner trägt .claude/settings.json
-//! und .ai-control/ (config.json + Icon — synct mit dem Projekt); die
+//! und .ai-central/ (config.json + Icon — synct mit dem Projekt); die
 //! Pool-Zuordnung ist maschinenlokal und liegt in der Registry.
 //!
 //! Identität: Jedes Projekt hat eine UUID (`id` in der config.json). Sie ist
@@ -22,13 +22,13 @@ use crate::domain::registry::{
 };
 
 /// Projekt-eigener Config-Ordner im Projekt-Root: config.json + Icon.
-pub(crate) const PROJECT_CONFIG_DIR: &str = ".ai-control";
+pub(crate) const PROJECT_CONFIG_DIR: &str = ".ai-central";
 
 /// Projekt-Config im Config-Ordner (Terminal-Einstellungen + Archiv-Home).
 pub(crate) const PROJECT_FILE: &str = "config.json";
 
 /// Alt-Layout: einzelne Datei im Projekt-Root; wird beim App-Start migriert.
-const LEGACY_PROJECT_FILE: &str = "ai-control.json";
+const LEGACY_PROJECT_FILE: &str = "ai-central.json";
 
 #[derive(Serialize)]
 pub(crate) struct Project {
@@ -61,6 +61,11 @@ pub(crate) struct ProjectConfig {
     skip_serializing_if = "Option::is_none"
   )]
   pub(crate) archive_home: Option<String>,
+  /// Modul-Abweichungen vom Default (`"commands": false`); fehlender Key =
+  /// Default aus der Registry (domain/modules.rs). Kern-Module ignorieren
+  /// den Eintrag.
+  #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+  pub(crate) modules: std::collections::BTreeMap<String, bool>,
   /// Alle Keys, die dieser Build nicht kennt — unverändert durchgereicht.
   /// Ohne das verliert jeder read-modify-write (Pool-Zuweisung, Terminal-
   /// Einstellungen) still die Felder neuerer Versionen: serde verwirft
@@ -93,15 +98,18 @@ pub(crate) fn settings_path(dir: &std::path::Path) -> PathBuf {
   dir.join(".claude").join("settings.json")
 }
 
-pub(crate) fn project_config_path(paths: &Paths, project: &str) -> Result<PathBuf, String> {
-  Ok(project_dir(paths, project)?.join(PROJECT_CONFIG_DIR).join(PROJECT_FILE))
-}
-
 pub(crate) fn read_project_config_in(
   paths: &Paths,
   project: &str,
 ) -> Result<ProjectConfig, String> {
-  let cfg_path = project_config_path(paths, project)?;
+  read_config_at(&project_dir(paths, project)?)
+}
+
+/// config.json unter `<dir>/.ai-central` lesen; ohne Datei der Default.
+/// Für Fälle, in denen der Ordner vor der Registrierung steht (Import,
+/// Migration) — sonst über `read_project_config_in`.
+pub(crate) fn read_config_at(dir: &std::path::Path) -> Result<ProjectConfig, String> {
+  let cfg_path = dir.join(PROJECT_CONFIG_DIR).join(PROJECT_FILE);
   if !cfg_path.is_file() {
     return Ok(ProjectConfig::default());
   }
@@ -197,12 +205,23 @@ pub(crate) fn verify_project_dir_in(paths: &Paths, project: &str) -> Result<Path
   Ok(dir)
 }
 
+/// Fehlerkennung „Projekt hat keinen Pool". Der Tray-/Popup-Start fängt genau
+/// diese ab und öffnet die Pool-Auswahl. Eine Kennung statt Klartext, damit die
+/// Unterscheidung nicht an einer übersetzbaren Meldung hängt.
+pub(crate) const NO_POOL: &str = "no-pool";
+
 /// Pool-Config-Verzeichnis eines Projekts — wird dem Terminal als
 /// CLAUDE_CONFIG_DIR mitgegeben.
 ///
+/// Ohne zugewiesenen Pool ist das ein Fehler, kein `Ok(None)`: Sonst startete
+/// die Session ohne CLAUDE_CONFIG_DIR und übernähme damit stillschweigend
+/// claudes Default-Verzeichnis samt dessen Login — ein Verzeichnis, das der
+/// Nutzer nie gewählt hat. `Ok(None)` bleibt allein dem Referenzpool auf
+/// `~/.claude` vorbehalten: dort ist der Default die ausdrückliche Wahl.
+///
 /// Der Pool-Name wird geprüft, obwohl `assign_pool_in` das beim Zuweisen schon
 /// tut: Die Migration übernimmt Pool-Einträge aus der alten, versionierten
-/// ai-control.json eines geklonten Repos. Ungeprüft bestimmte ein `../…`
+/// ai-central.json eines geklonten Repos. Ungeprüft bestimmte ein `../…`
 /// daraus ein beliebiges Verzeichnis als CLAUDE_CONFIG_DIR — und dessen
 /// `settings.json` trägt `apiKeyHelper`, ein Kommando, das beim Sessionstart
 /// ausgeführt wird.
@@ -215,7 +234,7 @@ pub(crate) fn project_pool_dir_in(
   project: &str,
 ) -> Result<Option<PathBuf>, String> {
   let Some(pool) = project_pool(paths, project)? else {
-    return Ok(None);
+    return Err(NO_POOL.to_string());
   };
   check_name(&pool).map_err(|_| format!("ungültiger Pool in der Registry: {pool}"))?;
   let dir = crate::domain::pool::pool_config_dir(paths, &pool)?;
@@ -235,10 +254,9 @@ pub(crate) fn project_config(project: &str) -> Result<ProjectConfig, String> {
 
 /// Legt ein Projekt nach dem Muster der bestehenden an: memory/, .gitignore
 /// (Sentinel), .claude/settings.json (autoMemoryDirectory, Permissions,
-/// Berechtigungen), Registry-Eintrag mit Pool, .ai-control/config.json mit
+/// Berechtigungen), Registry-Eintrag mit Pool, .ai-central/config.json mit
 /// ID, Name und Terminal-Config. Ohne Zielordner landet das Projekt unter
 /// ~/claude-projects/<name>. Liefert die neue Projekt-ID.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn create_project_full_in(
   paths: &Paths,
   name: &str,
@@ -247,7 +265,6 @@ pub(crate) fn create_project_full_in(
   work_dir: Option<&str>,
   create_work_dir: bool,
   terminal: TerminalConfig,
-  todo: bool,
 ) -> Result<String, String> {
   check_name(name)?;
   let dir = match dir {
@@ -281,7 +298,7 @@ pub(crate) fn create_project_full_in(
     .map_err(|e| format!("{}: {e}", dir.join(".claude").display()))?;
   fs::create_dir_all(dir.join("memory"))
     .map_err(|e| format!("{}: {e}", dir.join("memory").display()))?;
-  fs::write(dir.join(".gitignore"), ".ai-control-running\n")
+  fs::write(dir.join(".gitignore"), ".ai-central-running\n")
     .map_err(|e| format!("{}: {e}", dir.join(".gitignore").display()))?;
 
   let contracted = contract_home(paths, &dir);
@@ -309,12 +326,10 @@ pub(crate) fn create_project_full_in(
     name: Some(name.to_string()),
     terminal,
     archive_home: None,
+    modules: Default::default(),
     rest: Default::default(),
   };
   write_project_config_in(paths, &id, &cfg)?;
-  if todo {
-    crate::domain::todo::set_todo_in(paths, &id, true)?;
-  }
   crate::platform::write_terminal_desktop(paths, &id, &cfg);
   Ok(id)
 }
@@ -367,7 +382,7 @@ pub(crate) fn set_project_dir_in(paths: &Paths, name: &str, dir: &str) -> Result
 }
 
 /// Nimmt einen bestehenden Ordner als Projekt auf. Eine mitgebrachte
-/// .ai-control/config.json liefert ID und Name (Sync-Fall: dasselbe Projekt
+/// .ai-central/config.json liefert ID und Name (Sync-Fall: dasselbe Projekt
 /// behält seine ID auf jeder Maschine); ohne Config entsteht eine neue ID mit
 /// dem Ordnernamen als Name. Mitgebrachte Pfade werden geprüft und angelegt:
 /// Arbeitsordner aus der settings.json sowie das Archiv-Home samt
@@ -384,13 +399,7 @@ pub(crate) fn add_project_in(paths: &Paths, path: &str) -> Result<(), String> {
     .into_owned();
   check_name(&dirname)?;
 
-  let cfg_path = dir.join(PROJECT_CONFIG_DIR).join(PROJECT_FILE);
-  let mut cfg: ProjectConfig = if cfg_path.is_file() {
-    let raw = fs::read_to_string(&cfg_path).map_err(|e| format!("{}: {e}", cfg_path.display()))?;
-    serde_json::from_str(&raw).map_err(|e| format!("{}: {e}", cfg_path.display()))?
-  } else {
-    ProjectConfig::default()
-  };
+  let mut cfg = read_config_at(&dir)?;
   if let Some(id) = cfg.id.as_deref() {
     if load_registry(paths)?.contains_key(id) {
       return Err(format!("Projekt ist schon registriert: {id}"));
@@ -425,37 +434,16 @@ pub(crate) fn add_work_dir_in(paths: &Paths, name: &str, dir: &str) -> Result<()
   }
   let dir = contract_home(paths, &wd_path);
   let sp = settings_path(&project_dir(paths, name)?);
-  let mut v: serde_json::Value = if sp.is_file() {
-    let raw = fs::read_to_string(&sp).map_err(|e| format!("{}: {e}", sp.display()))?;
-    serde_json::from_str(&raw).map_err(|e| format!("{}: {e}", sp.display()))?
-  } else {
-    serde_json::json!({})
-  };
-  let root = v.as_object_mut().ok_or("settings.json ist kein Objekt")?;
-  let perms = root
-    .entry("permissions")
-    .or_insert_with(|| serde_json::json!({}))
-    .as_object_mut()
-    .ok_or("permissions ist kein Objekt")?;
-  let dirs = perms
-    .entry("additionalDirectories")
-    .or_insert_with(|| serde_json::json!([]))
-    .as_array_mut()
-    .ok_or("additionalDirectories ist kein Array")?;
-  if dirs.iter().any(|d| d.as_str() == Some(&dir)) {
-    return Err(format!("schon eingetragen: {dir}"));
-  }
-  dirs.push(serde_json::json!(dir));
-  let allow = perms
-    .entry("allow")
-    .or_insert_with(|| serde_json::json!([]))
-    .as_array_mut()
-    .ok_or("allow ist kein Array")?;
-  allow.insert(0, serde_json::json!(format!("Edit({dir}/**)")));
-  let parent = sp.parent().ok_or("settings.json ohne Elternordner")?;
-  fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-  let raw = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
-  crate::domain::write_atomic(&sp, &(raw + "\n"))
+  crate::domain::update_settings_permissions(&sp, true, |perms| {
+    let dirs = crate::domain::perm_array(perms, "additionalDirectories")?;
+    if dirs.iter().any(|d| d.as_str() == Some(&dir)) {
+      return Err(format!("schon eingetragen: {dir}"));
+    }
+    dirs.push(serde_json::json!(dir));
+    let allow = crate::domain::perm_array(perms, "allow")?;
+    allow.insert(0, serde_json::json!(format!("Edit({dir}/**)")));
+    Ok(())
+  })
 }
 
 /// Nimmt einen Arbeitsordner wieder raus: additionalDirectories-Eintrag und
@@ -463,25 +451,18 @@ pub(crate) fn add_work_dir_in(paths: &Paths, name: &str, dir: &str) -> Result<()
 pub(crate) fn remove_work_dir_in(paths: &Paths, name: &str, dir: &str) -> Result<(), String> {
   check_name(name)?;
   let sp = settings_path(&project_dir(paths, name)?);
-  let raw = fs::read_to_string(&sp).map_err(|e| format!("{}: {e}", sp.display()))?;
-  let mut v: serde_json::Value =
-    serde_json::from_str(&raw).map_err(|e| format!("{}: {e}", sp.display()))?;
-  let perms = v["permissions"]
-    .as_object_mut()
-    .ok_or("permissions ist kein Objekt")?;
-  let dirs = perms["additionalDirectories"]
-    .as_array_mut()
-    .ok_or("additionalDirectories ist kein Array")?;
-  let before = dirs.len();
-  dirs.retain(|d| d.as_str() != Some(dir));
-  if dirs.len() == before {
-    return Err(format!("nicht eingetragen: {dir}"));
-  }
-  if let Some(allow) = perms.get_mut("allow").and_then(|a| a.as_array_mut()) {
-    allow.retain(|p| p.as_str() != Some(&format!("Edit({dir}/**)")));
-  }
-  let raw = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
-  crate::domain::write_atomic(&sp, &(raw + "\n"))
+  crate::domain::update_settings_permissions(&sp, false, |perms| {
+    let dirs = crate::domain::perm_array(perms, "additionalDirectories")?;
+    let before = dirs.len();
+    dirs.retain(|d| d.as_str() != Some(dir));
+    if dirs.len() == before {
+      return Err(format!("nicht eingetragen: {dir}"));
+    }
+    if let Some(allow) = perms.get_mut("allow").and_then(|a| a.as_array_mut()) {
+      allow.retain(|p| p.as_str() != Some(&format!("Edit({dir}/**)")));
+    }
+    Ok(())
+  })
 }
 
 /// Arbeitsordner des Projekts: additionalDirectories aus der Projekt-settings.json.
@@ -513,9 +494,8 @@ pub(crate) fn project_work_dirs_in(paths: &Paths, name: &str) -> Result<Vec<Stri
 pub(crate) struct DeletePreview {
   pub(crate) name: String,
   pub(crate) project_dir: String,
-  pub(crate) ai_control_dir: bool,
+  pub(crate) ai_central_dir: bool,
   pub(crate) archive_permission: bool,
-  pub(crate) todo_hook: bool,
   pub(crate) panel_files: usize,
   pub(crate) archive_home: Option<String>,
   pub(crate) archive_docs: usize,
@@ -540,9 +520,8 @@ pub(crate) fn delete_preview_in(paths: &Paths, project: &str) -> Result<DeletePr
   Ok(DeletePreview {
     name: cfg.name.clone().unwrap_or_else(|| project.to_string()),
     project_dir: contract_home(paths, &dir),
-    ai_control_dir: dir.join(PROJECT_CONFIG_DIR).is_dir(),
+    ai_central_dir: dir.join(PROJECT_CONFIG_DIR).is_dir(),
     archive_permission: cfg.archive_home.is_some(),
-    todo_hook: crate::domain::todo::todo_state_in(paths, project)?,
     panel_files: session_files(paths, project).iter().filter(|f| f.is_file()).count(),
     archive_home: cfg.archive_home.clone(),
     archive_docs,
@@ -550,23 +529,23 @@ pub(crate) fn delete_preview_in(paths: &Paths, project: &str) -> Result<DeletePr
   })
 }
 
-/// Flüchtige Panel-Kanaldateien des Projekts unter ~/.config/ai-control/panels.
-fn session_files(paths: &Paths, project: &str) -> [PathBuf; 4] {
+/// Flüchtige Panel-Kanaldateien des Projekts unter ~/.config/ai-central/panels.
+/// Panel-Kanaldateien des Projekts — aus der Modul-Registry, damit neue
+/// Puffer automatisch in Löschvorschau und Löschung landen.
+fn session_files(paths: &Paths, project: &str) -> Vec<PathBuf> {
   let panels = paths.config_dir().join("panels");
-  [
-    panels.join(format!("{project}.md")),
-    panels.join(format!("{project}.commands.jsonl")),
-    panels.join(format!("{project}.search.json")),
-    panels.join(format!("{project}.wiki.json")),
-  ]
+  crate::domain::modules::MODULES
+    .iter()
+    .flat_map(|m| m.buffers)
+    .map(|b| panels.join(format!("{project}.{}", b.suffix)))
+    .collect()
 }
 
 /// Löscht ein Projekt in drei Stufen (Eskalationsleiter, jede schließt die
 /// vorige ein):
-/// - "integration": nur die ai-control-Spuren — Registry, .ai-control/,
-///   Archiv-Rechte und Todo-Hook in der settings.json, Panel-Dateien,
-///   .desktop. Ordner, memory/ und das Claude-Code-Grundgerüst der
-///   settings.json bleiben.
+/// - "integration": nur die ai-central-Spuren — Registry, .ai-central/,
+///   Archiv-Rechte in der settings.json, Panel-Dateien, .desktop. Ordner,
+///   memory/ und das Claude-Code-Grundgerüst der settings.json bleiben.
 /// - "archive": zusätzlich der Archiv-Ordner samt Dokumenten.
 /// - "full": zusätzlich der Projektordner; Arbeitsordner per Flag.
 pub(crate) fn delete_project_scoped_in(
@@ -597,9 +576,6 @@ pub(crate) fn delete_project_scoped_in(
     "integration" | "archive" => {
       if let Some(a) = cfg.archive_home.as_deref() {
         crate::domain::archive::remove_archive_permission(paths, project, a)?;
-      }
-      if crate::domain::todo::todo_state_in(paths, project)? {
-        crate::domain::todo::set_todo_in(paths, project, false)?;
       }
       let ac = dir.join(PROJECT_CONFIG_DIR);
       if ac.is_dir() {
@@ -653,20 +629,8 @@ pub(crate) fn set_terminal_config_in(
   // Dateiname speichern — das Icon synct damit mit dem Projekt.
   if let Some(icon) = terminal.icon.as_deref() {
     if icon.starts_with('/') {
-      let src = PathBuf::from(icon);
-      let ext = src
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("png")
-        .to_lowercase();
-      let name = format!("icon.{ext}");
       let cfg_dir = project_dir(paths, project)?.join(PROJECT_CONFIG_DIR);
-      fs::create_dir_all(&cfg_dir).map_err(|e| format!("{}: {e}", cfg_dir.display()))?;
-      let dest = cfg_dir.join(&name);
-      if src != dest {
-        fs::copy(&src, &dest).map_err(|e| format!("{}: {e}", src.display()))?;
-      }
-      terminal.icon = Some(name);
+      terminal.icon = Some(adopt_icon(std::path::Path::new(icon), &cfg_dir)?);
     }
   }
   // Die Terminal-Config kommt aus der Oberfläche und kennt nur die drei Felder;
@@ -678,8 +642,25 @@ pub(crate) fn set_terminal_config_in(
   Ok(())
 }
 
+/// Icon-Datei als `icon.<ext>` (kleingeschrieben, Default png) in den
+/// Projekt-Config-Ordner kopieren; liefert den gespeicherten Dateinamen.
+fn adopt_icon(src: &std::path::Path, cfg_dir: &std::path::Path) -> Result<String, String> {
+  let ext = src
+    .extension()
+    .and_then(|e| e.to_str())
+    .unwrap_or("png")
+    .to_lowercase();
+  let name = format!("icon.{ext}");
+  fs::create_dir_all(cfg_dir).map_err(|e| format!("{}: {e}", cfg_dir.display()))?;
+  let dest = cfg_dir.join(&name);
+  if src != dest {
+    fs::copy(src, &dest).map_err(|e| format!("{}: {e}", src.display()))?;
+  }
+  Ok(name)
+}
+
 /// Icon-Pfad einer Projekt-Config auflösen: relative Namen liegen im
-/// Projekt-Config-Ordner (.ai-control) des Projekts.
+/// Projekt-Config-Ordner (.ai-central) des Projekts.
 pub(crate) fn resolve_icon_path(
   paths: &Paths,
   project: &str,
@@ -690,6 +671,18 @@ pub(crate) fn resolve_icon_path(
   } else {
     Ok(project_dir(paths, project)?.join(PROJECT_CONFIG_DIR).join(icon))
   }
+}
+
+/// Die Ordner, die einem Projekt gehören: sein Projektordner und die
+/// Arbeitsverzeichnisse aus `permissions.additionalDirectories` (mit `~`
+/// aufgelöst). Eine Quelle für alle, die diese Grenze ziehen — der
+/// Panel-Lesezugriff ebenso wie der Commit-Dialog.
+pub(crate) fn project_roots_in(paths: &Paths, project: &str) -> Result<Vec<PathBuf>, String> {
+  let mut roots = vec![project_dir(paths, project)?];
+  for d in project_work_dirs_in(paths, project)? {
+    roots.push(expand_home(paths, &d));
+  }
+  Ok(roots)
 }
 
 /// Liest eine Datei für `write_panel(path)` — den promptfreien MCP-Weg.
@@ -705,10 +698,7 @@ pub(crate) fn read_for_panel_in(
 ) -> Result<String, String> {
   const MAX: u64 = 2 * 1024 * 1024;
   let canon = fs::canonicalize(expand_home(paths, src)).map_err(|e| format!("{src}: {e}"))?;
-  let mut roots = vec![project_dir(paths, project)?];
-  for d in project_work_dirs_in(paths, project)? {
-    roots.push(expand_home(paths, &d));
-  }
+  let mut roots = project_roots_in(paths, project)?;
   if let Some(a) = read_project_config_in(paths, project)?.archive_home {
     roots.push(expand_home(paths, &a));
   }
@@ -735,8 +725,8 @@ pub(crate) fn read_for_panel_in(
   Ok(text)
 }
 
-/// Migration beim App-Start (idempotent): ai-control.json aus dem Projekt-Root
-/// nach .ai-control/config.json, die Pool-Zuordnung daraus in die Registry,
+/// Migration beim App-Start (idempotent): ai-central.json aus dem Projekt-Root
+/// nach .ai-central/config.json, die Pool-Zuordnung daraus in die Registry,
 /// Projekt-Icons aus dem zentralen Icons-Verzeichnis in den Projekt-Config-Ordner.
 /// Namens-Schlüssel der Registry werden auf die Projekt-UUID umgestellt; fehlt
 /// die in der config.json, entsteht sie hier (Name = bisheriger Schlüssel).
@@ -771,34 +761,20 @@ pub(crate) fn migrate_layout_in(paths: &Paths) -> Result<(), String> {
     // war der Anzeigename.
     let cfg_dir = entry.dir.join(PROJECT_CONFIG_DIR);
     let cfg_path = cfg_dir.join(PROJECT_FILE);
-    let mut cfg: ProjectConfig = if cfg_path.is_file() {
-      let raw =
-        fs::read_to_string(&cfg_path).map_err(|e| format!("{}: {e}", cfg_path.display()))?;
-      serde_json::from_str(&raw).map_err(|e| format!("{}: {e}", cfg_path.display()))?
-    } else {
-      ProjectConfig::default()
-    };
+    let mut cfg = read_config_at(&entry.dir)?;
     let mut cfg_dirty = cfg.id.is_none() || cfg.name.is_none();
     let id = cfg.id.get_or_insert_with(|| uuid::Uuid::new_v4().to_string()).clone();
     cfg.name.get_or_insert_with(|| key.clone());
 
-    // Icon aus ~/.config/ai-control/icons/<name> in den Projekt-Config-Ordner
+    // Icon aus ~/.config/ai-central/icons/<name> in den Projekt-Config-Ordner
     // (Kopie + Löschen statt rename — Icons-Verzeichnis und Projekt können auf
     // verschiedenen Dateisystemen liegen).
     if let Some(icon) = cfg.terminal.icon.clone() {
       if !icon.starts_with('/') {
         let old = paths.icons_dir().join(&icon);
         if old.is_file() {
-          let ext = std::path::Path::new(&icon)
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("png")
-            .to_lowercase();
-          let name = format!("icon.{ext}");
-          fs::create_dir_all(&cfg_dir).map_err(|e| format!("{}: {e}", cfg_dir.display()))?;
-          fs::copy(&old, cfg_dir.join(&name)).map_err(|e| format!("{}: {e}", old.display()))?;
+          cfg.terminal.icon = Some(adopt_icon(&old, &cfg_dir)?);
           fs::remove_file(&old).map_err(|e| format!("{}: {e}", old.display()))?;
-          cfg.terminal.icon = Some(name);
           cfg_dirty = true;
         }
       }
@@ -824,7 +800,10 @@ pub(crate) fn migrate_layout_in(paths: &Paths) -> Result<(), String> {
 mod tests {
   use super::*;
   use crate::domain::testutil::{create_project, make_apikey_pool, make_oauth_pool, map_store, tmp_paths};
-  use crate::domain::todo::TODO_FILE;
+
+  fn project_config_path(paths: &Paths, project: &str) -> Result<PathBuf, String> {
+    Ok(project_dir(paths, project)?.join(PROJECT_CONFIG_DIR).join(PROJECT_FILE))
+  }
 
   /// Ein Pool-Eintrag mit Pfad-Bestandteilen — etwa per Migration aus der
   /// mitgeklonten Alt-Datei in die Registry gelangt — darf kein beliebiges
@@ -837,6 +816,18 @@ mod tests {
 
     let err = project_pool_dir_in(&p, "fremd").unwrap_err();
     assert!(err.contains("ungültiger Pool"));
+  }
+
+  /// Ohne zugewiesenen Pool gibt es kein CLAUDE_CONFIG_DIR und damit auch
+  /// keine Session: Der Fehler trägt die Kennung, an der der Tray-Start die
+  /// Pool-Auswahl öffnet. Ein stilles `Ok(None)` würde claudes
+  /// Default-Verzeichnis ungefragt übernehmen.
+  #[test]
+  fn projekt_ohne_pool_liefert_fehler() {
+    let p = tmp_paths();
+    create_project(&p, "ohne").unwrap();
+
+    assert_eq!(project_pool_dir_in(&p, "ohne").unwrap_err(), NO_POOL);
   }
 
   /// Das Setzen der Terminal-Config kommt aus der Oberfläche und kennt nur
@@ -877,7 +868,6 @@ mod tests {
         title: Some("Neu".into()),
         ..Default::default()
       },
-      true,
     )
     .unwrap();
 
@@ -885,7 +875,7 @@ mod tests {
     assert!(dir.join("memory").is_dir());
     assert_eq!(
       fs::read_to_string(dir.join(".gitignore")).unwrap(),
-      ".ai-control-running\n"
+      ".ai-central-running\n"
     );
     assert!(p.home.join("projects").join("neu").is_dir());
 
@@ -912,21 +902,14 @@ mod tests {
       "Edit(~/claude-projects/neu/**)"
     );
     assert_eq!(settings["permissions"]["additionalDirectories"][0], "~/projects/neu");
-    // todo=true: einziger SessionStart-Hook (kein pool-guard mehr), Datei da
-    assert!(dir.join(TODO_FILE).is_file());
-    let groups = settings["hooks"]["SessionStart"].as_array().unwrap();
-    assert_eq!(groups.len(), 1);
-    assert!(groups[0]["hooks"][0]["command"]
-      .as_str()
-      .unwrap()
-      .contains(TODO_FILE));
+    assert!(settings.get("hooks").is_none());
   }
 
   #[test]
   fn projekt_wizard_minimal_ohne_pool_und_workdir() {
     let p = tmp_paths();
     let id =
-      create_project_full_in(&p, "neu", None, None, None, false, TerminalConfig::default(), false)
+      create_project_full_in(&p, "neu", None, None, None, false, TerminalConfig::default())
         .unwrap();
     let dir = p.projects_dir().join("neu");
     assert!(dir.join(".claude").join("settings.json").is_file());
@@ -951,7 +934,7 @@ mod tests {
     let p = tmp_paths();
     create_project(&p, "neu").unwrap();
     let err =
-      create_project_full_in(&p, "neu", None, None, None, false, TerminalConfig::default(), false)
+      create_project_full_in(&p, "neu", None, None, None, false, TerminalConfig::default())
         .unwrap_err();
     assert!(err.contains("existiert bereits"));
   }
@@ -967,7 +950,6 @@ mod tests {
       Some("~/projects/gibtsnicht"),
       false,
       TerminalConfig::default(),
-      false,
     )
     .unwrap_err();
     assert!(err.contains("Arbeitsverzeichnis fehlt"));
@@ -1101,8 +1083,8 @@ mod tests {
 
   // -- Migration Alt-Layout --
 
-  /// Projekt im Alt-Layout: Registry-Schlüssel = Name, ai-control.json im
-  /// Projekt-Root, Icon im zentralen Icons-Verzeichnis, keine .ai-control/.
+  /// Projekt im Alt-Layout: Registry-Schlüssel = Name, ai-central.json im
+  /// Projekt-Root, Icon im zentralen Icons-Verzeichnis, keine .ai-central/.
   fn create_legacy_project(p: &Paths, name: &str) -> PathBuf {
     let dir = p.projects_dir().join(name);
     fs::create_dir_all(dir.join(".claude")).unwrap();
@@ -1261,7 +1243,7 @@ mod tests {
   #[test]
   fn projekt_loeschen_laesst_arbeitsordner() {
     let p = tmp_paths();
-    let id = create_project_full_in(&p, "proj", None, None, Some("~/projects/proj"), true, TerminalConfig::default(), false)
+    let id = create_project_full_in(&p, "proj", None, None, Some("~/projects/proj"), true, TerminalConfig::default())
       .unwrap();
     delete_project_scoped_in(&p, &id, "full", false).unwrap();
     assert!(!p.projects_dir().join("proj").exists());
@@ -1271,7 +1253,7 @@ mod tests {
   #[test]
   fn projekt_loeschen_mit_arbeitsordner() {
     let p = tmp_paths();
-    let id = create_project_full_in(&p, "proj", None, None, Some("~/projects/proj"), true, TerminalConfig::default(), false)
+    let id = create_project_full_in(&p, "proj", None, None, Some("~/projects/proj"), true, TerminalConfig::default())
       .unwrap();
     delete_project_scoped_in(&p, &id, "full", true).unwrap();
     assert!(!p.projects_dir().join("proj").exists());
@@ -1281,7 +1263,7 @@ mod tests {
   #[test]
   fn projekt_loeschen_fehlender_arbeitsordner_scheitert() {
     let p = tmp_paths();
-    let id = create_project_full_in(&p, "proj", None, None, Some("~/projects/proj"), true, TerminalConfig::default(), false)
+    let id = create_project_full_in(&p, "proj", None, None, Some("~/projects/proj"), true, TerminalConfig::default())
       .unwrap();
     fs::remove_dir_all(p.home.join("projects").join("proj")).unwrap();
     assert!(delete_project_scoped_in(&p, &id, "full", true).is_err());
@@ -1290,7 +1272,7 @@ mod tests {
   #[test]
   fn projekt_arbeitsordner_auslesen() {
     let p = tmp_paths();
-    let id = create_project_full_in(&p, "proj", None, None, Some("~/projects/proj"), true, TerminalConfig::default(), false)
+    let id = create_project_full_in(&p, "proj", None, None, Some("~/projects/proj"), true, TerminalConfig::default())
       .unwrap();
     assert_eq!(project_work_dirs_in(&p, &id).unwrap(), vec!["~/projects/proj"]);
     // Projekt ohne settings.json → leer
@@ -1308,7 +1290,7 @@ mod tests {
   #[test]
   fn arbeitsordner_nachtraeglich_erfassen_und_entfernen() {
     let p = tmp_paths();
-    let id = create_project_full_in(&p, "proj", None, None, None, false, TerminalConfig::default(), false)
+    let id = create_project_full_in(&p, "proj", None, None, None, false, TerminalConfig::default())
       .unwrap();
     fs::create_dir_all(p.home.join("projects/extra")).unwrap();
     let picked = p.home.join("projects/extra").to_string_lossy().into_owned();
@@ -1330,7 +1312,7 @@ mod tests {
   #[test]
   fn projektordner_verlegen() {
     let p = tmp_paths();
-    let id = create_project_full_in(&p, "proj", None, None, None, false, TerminalConfig::default(), false)
+    let id = create_project_full_in(&p, "proj", None, None, None, false, TerminalConfig::default())
       .unwrap();
     // Nutzer hat den Ordner selbst verschoben; die App ordnet nur neu zu.
     let new_dir = p.home.join("elsewhere").join("proj");
@@ -1381,12 +1363,12 @@ mod tests {
     assert!(read_for_panel_in(&p, "proj", "/dev/zero").is_err());
   }
 
-  /// Stufe „nur Integration": ai-control-Spuren weg, Ordner und
+  /// Stufe „nur Integration": ai-central-Spuren weg, Ordner und
   /// Claude-Code-Bestand bleiben.
   #[test]
   fn loeschen_nur_integration() {
     let p = tmp_paths();
-    let id = create_project_full_in(&p, "proj", None, None, None, false, TerminalConfig::default(), true)
+    let id = create_project_full_in(&p, "proj", None, None, None, false, TerminalConfig::default())
       .unwrap();
     let dir = p.projects_dir().join("proj");
     // Archiv-Home samt Permission wie über die UI gesetzt
@@ -1401,7 +1383,7 @@ mod tests {
     fs::write(p.config_dir().join("panels").join(format!("{id}.md")), "x").unwrap();
 
     let preview = delete_preview_in(&p, &id).unwrap();
-    assert!(preview.ai_control_dir && preview.archive_permission && preview.todo_hook);
+    assert!(preview.ai_central_dir && preview.archive_permission);
     assert_eq!(preview.panel_files, 1);
     assert_eq!(preview.archive_docs, 1);
 
@@ -1411,9 +1393,7 @@ mod tests {
     assert!(!dir.join(PROJECT_CONFIG_DIR).exists());
     let sp = fs::read_to_string(settings_path(&dir)).unwrap();
     assert!(!sp.contains("archiv/proj"));
-    assert!(!sp.contains("OFFENE-PUNKTE.md")); // Hook weg (leere Hook-Liste darf bleiben)
     assert!(sp.contains("autoMemoryDirectory")); // Claude-Code-Bestand bleibt
-    assert!(dir.join(crate::domain::todo::TODO_FILE).is_file()); // Nutzerinhalt bleibt
     assert!(p.home.join("archiv/proj/doc.md").is_file()); // Archiv bleibt
     assert!(!p.config_dir().join("panels").join(format!("{id}.md")).exists());
     assert!(load_registry(&p).unwrap().is_empty());
@@ -1423,7 +1403,7 @@ mod tests {
   #[test]
   fn loeschen_integration_und_archiv() {
     let p = tmp_paths();
-    let id = create_project_full_in(&p, "proj", None, None, None, false, TerminalConfig::default(), false)
+    let id = create_project_full_in(&p, "proj", None, None, None, false, TerminalConfig::default())
       .unwrap();
     let mut cfg = read_project_config_in(&p, &id).unwrap();
     cfg.archive_home = Some("~/archiv/proj".into());

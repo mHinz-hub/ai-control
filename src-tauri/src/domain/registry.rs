@@ -1,6 +1,6 @@
 //! Projekt-Registry: projects.json (Projekt-ID → Ordner + Pool) unter
-//! ~/.config/ai-control. Schlüssel ist die Projekt-UUID aus der
-//! .ai-control/config.json des Projekts; die Pool-Zuordnung ist
+//! ~/.config/ai-central. Schlüssel ist die Projekt-UUID aus der
+//! .ai-central/config.json des Projekts; die Pool-Zuordnung ist
 //! maschinenlokal und lebt deshalb hier, nicht in der syncbaren
 //! Projekt-Config.
 

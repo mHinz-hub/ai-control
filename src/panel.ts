@@ -4,9 +4,8 @@ import "@fontsource/jetbrains-mono/500.css";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
-import { emit } from "@tauri-apps/api/event";
 import { wirePanel } from "./panel-wiring";
-import { flash, panelToast } from "./commands-view";
+import { flash, panelToast } from "./tiles";
 import { initArchiveForm } from "./archive-form";
 import { applyTheme, THEMES } from "./themes";
 import { applyI18n, t } from "./messages";
@@ -88,58 +87,99 @@ await win.onResized(saveGeo);
 // Farben ans Theme koppeln — derselbe Look wie das angedockte Panel im
 // Terminal-Fenster (die CSS-Defaults sind Mocha).
 interface Project {
+  id: string;
   name: string;
   terminal: { theme: string | null };
 }
 const projects = await invoke<Project[]>("list_projects");
-const picked = THEMES[projects.find((p) => p.name === project)?.terminal.theme ?? "mocha"];
+const picked =
+  THEMES[projects.find((p) => p.id === project)?.terminal.theme ?? "mocha"];
 applyTheme(picked);
 // Fensterhintergrund des Panel-Fensters ist die Kopf-Fläche, nicht das
 // Terminal-Dunkel.
 document.documentElement.style.background = picked.header;
 document.body.style.background = picked.header;
 
-const { view, cmdView, mode, draft } = await wirePanel(project);
-if (!draft.trim() && !cmdView.empty()) mode.to("commands");
+const { view, mode, draft } = await wirePanel(project, undefined, true);
+// Das Panel-Fenster ist die Archiv-Fläche: gewünschter Tab aus der URL,
+// sonst das Archiv; ein hereingereichter Entwurf (Bearbeiten) gewinnt.
+const initialMode = new URLSearchParams(location.search).get("mode");
+if (initialMode) {
+  mode.to(initialMode);
+} else if (!draft.trim()) {
+  mode.to("wiki");
+}
 
 // Archivieren: wie im angedockten Panel — Formular aufklappen, Abschicken
 // wählt notfalls erst das Archiv-Home per Dialog.
 const archiveBtn = document.getElementById("panel-archive")!;
-const archiveForm = initArchiveForm(archiveBtn, async (meta) => {
-  try {
-    const configured = await invoke<string | null>("panel_archive_dir_cmd", {
-      project,
-    });
-    let dir: string | undefined;
-    if (!configured) {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const chosen = await open({ directory: true, title: t("panel.chooseArchiveDir") });
-      if (!chosen) return;
-      dir = chosen as string;
+const archiveForm = initArchiveForm(
+  archiveBtn,
+  async (meta) => {
+    try {
+      const configured = await invoke<string | null>("panel_archive_dir_cmd", {
+        project,
+      });
+      let dir: string | undefined;
+      if (!configured) {
+        const { open } = await import("@tauri-apps/plugin-dialog");
+        const chosen = await open({
+          directory: true,
+          title: t("panel.chooseArchiveDir"),
+        });
+        if (!chosen) return;
+        dir = chosen as string;
+      }
+      await view.flush(); // offene Bearbeitung erst speichern — archiviert, was zu sehen ist
+      await invoke<string>("panel_archive_cmd", {
+        project,
+        dir,
+        title: meta.title ?? null,
+        folder: meta.folder ?? null,
+        description: meta.description ?? null,
+        tags: meta.tags,
+      });
+      flash(archiveBtn, "copied", 1400);
+    } catch (e) {
+      flash(archiveBtn, "error", 1400);
+      panelToast(`Archivieren fehlgeschlagen: ${e}`);
     }
-    await view.flush(); // offene Bearbeitung erst speichern — archiviert, was zu sehen ist
-    const path = await invoke<string>("panel_archive_cmd", {
-      project,
-      dir,
-      folder: meta.folder ?? null,
-      description: meta.description ?? null,
-      tags: meta.tags,
-    });
-    flash(archiveBtn, "copied", 1400);
-    invoke("reveal_path_cmd", { path });
-  } catch (e) {
-    flash(archiveBtn, "error", 1400);
-    panelToast(`Archivieren fehlgeschlagen: ${e}`);
-  }
-});
+  },
+  {
+    // Ordner-Vorschläge aus dem Archiv; „Auf Platte legen" schreibt den
+    // Entwurf an einen frei gewählten Pfad (ohne Archiv, ohne Frontmatter).
+    folders: () => invoke("archive_folders", { project }),
+    title: () => invoke("panel_title_cmd", { project }),
+    onSave: async () => {
+      try {
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        const path = await save({
+          title: t("archiveForm.saveTitle"),
+          defaultPath: "entwurf.md",
+        });
+        if (!path) return;
+        await view.flush();
+        await invoke("panel_save_as", { project, path });
+        flash(archiveBtn, "copied", 1400);
+      } catch (e) {
+        flash(archiveBtn, "error", 1400);
+        panelToast(`Speichern fehlgeschlagen: ${e}`);
+      }
+    },
+  },
+);
 archiveBtn.addEventListener("click", () => archiveForm.toggle());
 
-// „Andocken": angedocktes Panel wieder einblenden, dann dieses Fenster schließen.
-document.getElementById("panel-dock")!.addEventListener("click", async () => {
-  await emit("panel-attached");
-  win.close();
-});
+// Öffner-Klick im Terminal-Header bei stehendem Fenster: auf den
+// gewünschten Tab schalten (das Fokussieren macht der Kern).
+await win.listen<string>("panel-mode", (e) => mode.to(e.payload));
+
+// Andocken gibt es nicht mehr — die Flächen sind fest verteilt (Session-Tabs
+// im Dock, Archiv hier); der Knopf bleibt versteckt.
+document.getElementById("panel-dock")!.hidden = true;
 
 // „Schließen": Fenster zu, ohne wieder anzudocken (Panel bleibt aus, bis ein
 // neuer Entwurf kommt).
-document.getElementById("panel-close")!.addEventListener("click", () => win.close());
+document
+  .getElementById("panel-close")!
+  .addEventListener("click", () => win.close());

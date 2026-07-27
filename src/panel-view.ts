@@ -1,6 +1,6 @@
 import { renderMarkdown } from "./markdown";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { flash } from "./commands-view";
+import { flash } from "./tiles";
 import { t } from "./messages";
 
 export interface PanelView {

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-enabled-modules"
+description = "Enables the enabled_modules command without any pre-configured scope."
+commands.allow = ["enabled_modules"]
+
+[[permission]]
+identifier = "deny-enabled-modules"
+description = "Denies the enabled_modules command without any pre-configured scope."
+commands.deny = ["enabled_modules"]

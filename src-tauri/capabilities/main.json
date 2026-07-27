@@ -38,8 +38,6 @@
     "allow-unassign-pool",
     "allow-set-terminal-config",
     "allow-project-icon",
-    "allow-todo-state",
-    "allow-set-todo",
     "allow-usage-stats",
     "allow-stop-project",
     "allow-restart-project",
@@ -56,6 +54,8 @@
     "allow-archive-docs-cmd",
     "allow-delete-preview",
     "allow-delete-project-scoped",
-    "allow-change-archive-home-cmd"
+    "allow-change-archive-home-cmd",
+    "allow-module-registry",
+    "allow-set-module"
   ]
 }

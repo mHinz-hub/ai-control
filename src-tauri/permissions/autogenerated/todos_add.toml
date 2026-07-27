@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-todos-add"
+description = "Enables the todos_add command without any pre-configured scope."
+commands.allow = ["todos_add"]
+
+[[permission]]
+identifier = "deny-todos-add"
+description = "Denies the todos_add command without any pre-configured scope."
+commands.deny = ["todos_add"]

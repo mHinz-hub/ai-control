@@ -92,6 +92,143 @@
     system-ui,
     sans-serif;
 }
+/* ToDo-Kacheln: Layout wie Befehls-Kacheln (cmd-tile/cmd-body), eigener
+   Text-Stil und Fälligkeits-Ampel. */
+#todo-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px;
+}
+#todo-content::-webkit-scrollbar {
+  width: 8px;
+}
+#todo-content::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+}
+.todo-text {
+  font:
+    400 12px/1.45 -apple-system,
+    system-ui,
+    sans-serif;
+  word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+.todo-due {
+  display: inline-block;
+  margin-top: 5px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-family: "JetBrains Mono", Menlo, monospace;
+  font-size: 10px;
+  font-weight: 500;
+}
+.todo-due.overdue {
+  color: var(--err);
+  border: 1px solid var(--err);
+}
+.todo-due.soon {
+  color: var(--warn);
+  border: 1px solid var(--warn);
+}
+.todo-due.later {
+  color: var(--ok);
+  border: 1px solid var(--ok);
+}
+/* Kopfzeile mit Anlegen-Knopf und das ToDo-Formular (Anlegen/Bearbeiten),
+   in-flow über der Liste; Input-Stil wie im Archiv-Formular. */
+.todo-head {
+  display: flex;
+  justify-content: flex-end;
+}
+.todo-add {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font:
+    500 11px/1 -apple-system,
+    system-ui,
+    sans-serif;
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+.todo-add:hover {
+  background: var(--line);
+  color: var(--text);
+}
+.todo-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--tile);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 6px;
+}
+.todo-form[hidden] {
+  display: none;
+}
+.todo-form input {
+  box-sizing: border-box;
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--text);
+  font:
+    400 12px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+  outline: none;
+}
+.todo-form input:focus {
+  border-color: var(--line-strong);
+}
+.todo-form input::placeholder {
+  color: var(--faint);
+}
+.todo-form input[type="date"] {
+  color-scheme: dark;
+}
+.todo-form-btns {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.todo-form-cancel {
+  border: 1px solid var(--line);
+  background: none;
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font:
+    500 12px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.todo-form-cancel:hover {
+  background: var(--line);
+}
+.todo-form-submit {
+  border: none;
+  background: var(--line);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font:
+    500 12px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.todo-form-submit:hover {
+  background: var(--line-strong);
+}
+
 #search-content {
   flex: 1;
   min-height: 0;
@@ -174,61 +311,656 @@
   font-size: 10px;
 }
 
-/* Wiki-Ansicht: Übersichts-/Schlagwort-Seiten und Dokumente. */
-#wiki-content {
+/* Wiki-Ansicht: Ordner-Baum links, flache Inhaltsliste rechts. */
+/* :not([hidden]): display:flex würde sonst das hidden-Attribut des
+   Tab-Wechsels überstimmen — der Baum stünde im Such-Tab weiter da. */
+#wiki-content:not([hidden]) {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
+  display: flex;
   padding: 14px 16px;
 }
-#wiki-content::-webkit-scrollbar {
+.wiki-tree::-webkit-scrollbar,
+.wiki-main::-webkit-scrollbar {
   width: 8px;
 }
-#wiki-content::-webkit-scrollbar-thumb {
+.wiki-tree::-webkit-scrollbar-thumb,
+.wiki-main::-webkit-scrollbar-thumb {
   background: var(--line);
   border-radius: 4px;
 }
-.wiki-head {
+/* Baum links, Seite rechts; beide Spalten scrollen unabhängig. */
+.wiki-layout {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
+  align-items: stretch;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
 }
-.wiki-head-left {
+.wiki-tree {
+  flex: 0 0 230px;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--line-strong);
+  padding-right: 8px;
 }
-.wiki-head-title {
+.wiki-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+.wiki-tree .wiki-tree-children {
+  padding-left: 0;
+  border-left: 2px solid var(--line-strong);
+}
+/* Wurzel-Ebene: Linie mittig unter dem Archiv-Knoten. */
+.wiki-tree > .wiki-tree-children {
+  margin-left: 1em;
+}
+/* Ordner-Ebenen: Linie genauso mittig unter dem Ordner-Knoten (0.7em
+   Zeilenbeginn + 1em). */
+.wiki-tree details > .wiki-tree-children {
+  margin-left: 1.7em;
+}
+/* Absatz zwischen Dokumenten und Ordner-Gruppe derselben Ebene. */
+.wiki-tree .wiki-tree-doc + details {
+  margin-top: 3px;
+}
+.wiki-tree summary {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  list-style: none;
+  cursor: pointer;
+  padding: 5px 6px 5px 0.7em;
+  border-radius: 5px;
   color: var(--text);
   font:
-    600 13px/1.3 -apple-system,
+    500 16px/1.5 -apple-system,
+    system-ui,
+    sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* Notiz-Blatt im Baum (Dokument ohne Kinder). */
+.wiki-tree-doc {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 5px 6px 5px 0.4em;
+  border-radius: 5px;
+  color: var(--text);
+  font:
+    400 16px/1.5 -apple-system,
     system-ui,
     sans-serif;
 }
-.wiki-head-sub {
-  margin-top: 2px;
-  color: var(--faint);
-  font-family: "JetBrains Mono", Menlo, monospace;
-  font-size: 10px;
+/* Typ-Symbole (Ordner/Notiz) im Trilium-Stil vor dem Namen. */
+.wiki-tree-icon {
+  flex: none;
+  display: inline-flex;
+  margin-right: 6px;
+}
+.wiki-tree-icon svg {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.wiki-tree summary.active .wiki-tree-icon svg,
+.wiki-tree-doc.active .wiki-tree-icon svg {
+  stroke: var(--accent);
+}
+.wiki-tree-doc:hover {
+  background: var(--tile);
+}
+.wiki-tree-doc.active,
+.wiki-tree summary.active,
+.wiki-tree-root.active {
+  background: var(--tile);
+  color: var(--accent);
+}
+.wiki-tree summary::-webkit-details-marker {
+  display: none;
+}
+.wiki-tree-arrow {
+  flex: none;
+  width: 16px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+  transition: transform 0.12s;
+}
+.wiki-tree-arrow:hover {
+  color: var(--text);
+}
+.wiki-tree details[open] > summary .wiki-tree-arrow {
+  transform: rotate(90deg);
+}
+.wiki-tree-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.wiki-head-right {
-  color: var(--faint);
+.wiki-tree summary .panel-btn {
+  visibility: hidden;
+}
+.wiki-tree summary:hover .panel-btn {
+  visibility: visible;
+}
+.wiki-tree summary:hover,
+.wiki-tree-root:hover {
+  background: var(--tile);
+  border-radius: 4px;
+}
+.wiki-tree-root {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 2px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font:
-    500 11px/1 -apple-system,
+    600 16px/1.7 -apple-system,
     system-ui,
     sans-serif;
-  white-space: nowrap;
 }
-.wiki-chips {
+.wiki-tree-input {
+  box-sizing: border-box;
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 2px 4px;
+  color: var(--text);
+  font:
+    400 15px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+  outline: none;
+}
+/* Zeilen-Aktionen erst beim Überfahren der Zeile. */
+.wiki-doc-actions {
+  display: flex;
+  gap: 2px;
+  visibility: hidden;
+}
+.wiki-doc:hover .wiki-doc-actions {
+  visibility: visible;
+}
+/* Kopfzeile des Baums: Wurzel-Knopf + Ordner anlegen. */
+.wiki-tree-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.wiki-tree-head .wiki-tree-root {
+  flex: 1;
+  min-width: 0;
+}
+.wiki-add {
+  border: none;
+  background: none;
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 0 5px;
+  font:
+    500 13px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+  cursor: pointer;
+}
+.wiki-add:hover {
+  background: var(--tile);
+  color: var(--text);
+}
+/* Anlege-Dialog (Ordner/Dokument): modales Popup mit abgedunkeltem
+   Hintergrund. */
+.wiki-modal[hidden] {
+  display: none;
+}
+.wiki-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wiki-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 380px;
+  background: var(--tile);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.6),
+    0 2px 8px rgba(0, 0, 0, 0.4);
+  padding: 18px 20px;
+}
+.wiki-form-title {
+  color: var(--text);
+  font:
+    600 16px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.wiki-form-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.wiki-form .wiki-tree-input {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 15px;
+}
+.wiki-form-submit,
+.wiki-form-cancel {
+  border: none;
+  background: var(--line);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 7px 16px;
+  cursor: pointer;
+  font:
+    500 14px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.wiki-form-submit:hover {
+  background: var(--line-strong);
+}
+.wiki-form-cancel {
+  background: none;
+  color: var(--muted);
+}
+.wiki-form-cancel:hover {
+  background: var(--tile);
+}
+/* Notiz-Ansicht rechts: großer Titel wie in Trilium, Meta-Zeile, Inhalt. */
+.wiki-note-head {
+  border-bottom: 1px solid var(--line-strong);
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+}
+.wiki-note-titlerow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wiki-note-back {
+  flex: none;
+  border: none;
+  background: none;
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 20px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.wiki-note-back:hover:not(:disabled) {
+  background: var(--tile);
+  color: var(--text);
+}
+.wiki-note-back:disabled {
+  color: var(--line);
+  cursor: default;
+}
+.wiki-note-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font:
+    600 24px/1.3 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.wiki-note-title.editable {
+  cursor: text;
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin-left: -6px;
+}
+.wiki-note-title.editable:hover {
+  background: var(--tile);
+}
+.wiki-note-title-input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin-left: -6px;
+  outline: none;
+  font:
+    600 24px/1.3 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.wiki-note-actions {
+  display: flex;
+  gap: 2px;
+  visibility: hidden;
+}
+.wiki-note-head:hover .wiki-note-title.editable {
+  cursor: text;
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin-left: -6px;
+}
+.wiki-note-title.editable:hover {
+  background: var(--tile);
+}
+.wiki-note-title-input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin-left: -6px;
+  outline: none;
+  font:
+    600 24px/1.3 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.wiki-note-actions {
+  visibility: visible;
+}
+/* WYSIWYG-Editor der HTML-Notizen (ProseMirror). */
+.html-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.html-toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin: 10px 0 4px;
+  background: var(--tile);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 6px;
 }
+.html-tool {
+  min-width: 32px;
+  border: 1px solid transparent;
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 5px;
+  padding: 5px 8px;
+  cursor: pointer;
+  font:
+    600 14px/1.2 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.html-tool:hover {
+  border-color: var(--accent);
+}
+.html-surface .ProseMirror {
+  min-height: 55vh;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 14px 16px;
+  outline: none;
+  color: var(--text);
+  font:
+    400 17px/1.6 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.html-surface .ProseMirror:focus {
+  border-color: var(--accent);
+}
+.html-surface .ProseMirror table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 0.7em;
+}
+.html-surface .ProseMirror td,
+.html-surface .ProseMirror th {
+  border: 1px solid var(--line-strong);
+  padding: 6px 8px;
+  vertical-align: top;
+}
+.html-surface .ProseMirror .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  opacity: 0.18;
+  pointer-events: none;
+}
+.html-surface .ProseMirror td,
+.html-surface .ProseMirror th {
+  position: relative;
+}
+/* Markdown-Editor der Notiz (Bearbeiten im Archiv): Rohtext links,
+   Live-Vorschau rechts. */
+.wiki-edit-split {
+  display: flex;
+  gap: 14px;
+  align-items: stretch;
+}
+.wiki-edit-split > * {
+  flex: 1 1 50%;
+  min-width: 0;
+}
+.wiki-edit-preview {
+  overflow: auto;
+  max-height: 70vh;
+  border-left: 1px solid var(--line-strong);
+  padding-left: 14px;
+}
+.wiki-note-editor {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 60vh;
+  resize: vertical;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 12px 14px;
+  outline: none;
+  font: 400 14px/1.6 "JetBrains Mono", Menlo, monospace;
+}
+.wiki-note-editor:focus {
+  border-color: var(--accent);
+}
+.wiki-note-error {
+  color: #f38ba8;
+  margin-bottom: 8px;
+  font:
+    500 13px/1.5 -apple-system,
+    system-ui,
+    sans-serif;
+}
+/* Kontextmenü im Baum (rechte Maustaste). */
+.wiki-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 180px;
+  background: var(--tile);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.55),
+    0 2px 8px rgba(0, 0, 0, 0.4);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.wiki-menu-item {
+  border: none;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  border-radius: 5px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font:
+    400 14px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.wiki-menu-item:hover {
+  background: var(--surface);
+}
+/* Info-Popup am ⓘ-Knopf der Titelzeile. */
+.wiki-note-titlerow {
+  position: relative;
+}
+.wiki-note-info-pop {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 100;
+  min-width: 240px;
+  background: var(--tile);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.55),
+    0 2px 8px rgba(0, 0, 0, 0.4);
+  padding: 12px 16px;
+  margin-top: 6px;
+}
+.wiki-info-caption {
+  color: var(--text);
+  margin-bottom: 6px;
+  font:
+    600 13px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.wiki-info-line {
+  color: var(--muted);
+  white-space: nowrap;
+  font:
+    500 13px/1.7 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.wiki-note-body {
+  color: var(--text);
+  font:
+    400 17px/1.6 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.wiki-note-body h1,
+.wiki-note-body h2,
+.wiki-note-body h3 {
+  line-height: 1.25;
+  margin: 1em 0 0.4em;
+}
+.wiki-note-body h1 {
+  font-size: 1.35em;
+}
+.wiki-note-body h2 {
+  font-size: 1.15em;
+}
+.wiki-note-body h3 {
+  font-size: 1.05em;
+}
+.wiki-note-body :first-child {
+  margin-top: 0;
+}
+.wiki-note-body p,
+.wiki-note-body ul,
+.wiki-note-body ol,
+.wiki-note-body pre,
+.wiki-note-body blockquote {
+  margin: 0 0 0.7em;
+}
+.wiki-note-body code {
+  font-family: "JetBrains Mono", Menlo, monospace;
+  font-size: 0.85em;
+  background: var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.wiki-note-body pre {
+  background: var(--tile);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow: auto;
+}
+.wiki-note-body pre code {
+  background: none;
+  padding: 0;
+}
+.wiki-note-body blockquote {
+  border-left: 3px solid var(--line);
+  padding-left: 12px;
+  color: var(--muted);
+}
+.wiki-note-body a {
+  color: var(--accent);
+}
+.wiki-note-body table {
+  border-collapse: collapse;
+  margin: 0 0 0.7em;
+}
+.wiki-note-body td,
+.wiki-note-body th {
+  border: 1px solid var(--line-strong);
+  padding: 6px 8px;
+  vertical-align: top;
+}
+.wiki-note-children {
+  margin-top: 26px;
+  background: var(--tile);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.wiki-children-caption {
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 10px;
+  font:
+    600 12px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+}
+/* Default-Text einer Ordner-Notiz ohne Inhaltsdatei. */
+.wiki-note-body.default {
+  color: var(--muted);
+}
+/* Einstiegs-Knopf im Leerzustand. */
 .wiki-chip {
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   background: transparent;
   color: var(--muted);
   border-radius: 999px;
@@ -242,33 +974,19 @@
   background: var(--line);
   color: var(--text);
 }
-.wiki-chip.active {
-  background: var(--line);
-  border-color: var(--line-strong);
-  color: var(--accent);
-}
-.wiki-folder {
-  margin: 14px 0 2px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-  color: var(--faint);
-  font:
-    500 10px/1 -apple-system,
-    system-ui,
-    sans-serif;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  user-select: none;
-  -webkit-user-select: none;
-}
 .wiki-doc {
-  padding: 7px 8px;
-  margin: 4px -8px 0;
+  padding: 10px 12px;
+  margin: 0 0 8px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
   cursor: pointer;
 }
+.wiki-doc:last-child {
+  margin-bottom: 0;
+}
 .wiki-doc:hover {
-  background: var(--tile);
+  border-color: var(--accent);
 }
 .wiki-doc-line {
   display: flex;
@@ -280,28 +998,23 @@
   min-width: 0;
   color: var(--accent);
   font:
-    600 12px/1.4 -apple-system,
+    600 16px/1.4 -apple-system,
     system-ui,
     sans-serif;
 }
 .wiki-doc-date {
   color: var(--faint);
   font-family: "JetBrains Mono", Menlo, monospace;
-  font-size: 10px;
+  font-size: 11.5px;
+  white-space: nowrap;
 }
 .wiki-doc-desc {
   margin-top: 2px;
   color: var(--muted);
   font:
-    400 11px/1.5 -apple-system,
+    400 14px/1.5 -apple-system,
     system-ui,
     sans-serif;
-}
-.wiki-doc-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 5px;
 }
 .wiki-empty {
   margin-top: 18px;
@@ -317,100 +1030,6 @@
   color: var(--text);
   font-weight: 600;
 }
-.wiki-doc-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.wiki-back {
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  font:
-    500 11px/1 -apple-system,
-    system-ui,
-    sans-serif;
-  border-radius: 6px;
-  padding: 4px 6px;
-}
-.wiki-back:hover {
-  background: var(--line);
-  color: var(--text);
-}
-.wiki-body {
-  font-size: 12.5px;
-  line-height: 1.55;
-  user-select: text;
-  -webkit-user-select: text;
-  cursor: text;
-}
-.wiki-body h1,
-.wiki-body h2,
-.wiki-body h3 {
-  line-height: 1.25;
-  margin: 1em 0 0.4em;
-}
-.wiki-body h1 {
-  font-size: 1.4em;
-}
-.wiki-body h2 {
-  font-size: 1.2em;
-}
-.wiki-body h3 {
-  font-size: 1.05em;
-}
-.wiki-body :first-child {
-  margin-top: 0;
-}
-.wiki-body p,
-.wiki-body ul,
-.wiki-body ol,
-.wiki-body pre,
-.wiki-body blockquote {
-  margin: 0 0 0.7em;
-}
-.wiki-body code {
-  font-family: "JetBrains Mono", Menlo, monospace;
-  font-size: 0.9em;
-  background: var(--line);
-  border-radius: 4px;
-  padding: 1px 5px;
-}
-.wiki-body pre {
-  background: var(--tile);
-  border-radius: 8px;
-  padding: 12px 14px;
-  overflow: auto;
-}
-.wiki-body pre code {
-  background: none;
-  padding: 0;
-}
-.wiki-body blockquote {
-  border-left: 3px solid var(--line);
-  padding-left: 12px;
-  color: var(--muted);
-}
-.wiki-body a {
-  color: var(--accent);
-}
-.wiki-backlinks {
-  margin-top: 14px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-  color: var(--faint);
-  font:
-    500 11px/1.6 -apple-system,
-    system-ui,
-    sans-serif;
-}
-.wiki-backlinks a {
-  color: var(--accent);
-  text-decoration: none;
-}
-
 /* Backlink-Zähler in der Dokumentzeile. */
 .wiki-doc-back {
   color: var(--faint);
@@ -422,55 +1041,140 @@
 }
 
 /* Archiv-Formular: klappt unter dem Archiv-Button auf. */
-.archive-form {
-  position: fixed;
-  z-index: 20;
+/* Archiv-Dialog: Optik aus .wiki-modal/.wiki-form, plus Ordner-Baum zum
+   Anklicken. */
+.archive-form-box {
+  min-width: 540px;
+  max-width: 90vw;
+}
+.archive-form-label {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  width: 260px;
+  color: var(--text);
+  font:
+    600 14px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+}
+/* Eingabefelder des Dialogs sichtbar abheben — der dünne Rahmen auf
+   dunklem Grund war als Feld nicht zu erkennen. */
+.archive-form-box .wiki-tree-input {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 9px 12px;
+  font-size: 15px;
+}
+.archive-form-box .wiki-tree-input:focus {
+  border-color: var(--accent);
+}
+.archive-form-box .wiki-tree-input::placeholder {
+  color: var(--faint);
+}
+/* Durchlaufbarer Ordnerbaum: eigene Fläche, scrollt bei vielen Ordnern. */
+.archive-browse {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 240px;
+  /* Nur senkrecht scrollen: eine waagerechte Leiste am unteren Rand sähe
+     aus wie ein weiteres Bedienelement. Lange Titel kürzen stattdessen. */
+  overflow-y: auto;
+  overflow-x: hidden;
   background: var(--surface);
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  padding: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  padding: 6px;
 }
-.archive-form[hidden] {
+.archive-browse-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 5px;
+  padding: 5px 8px;
+  /* Einrückung nach Tiefe — dieselbe Staffelung wie im Archiv-Baum. */
+  padding-left: calc(8px + var(--depth, 0) * 18px);
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0;
+  font:
+    400 15px/1.5 -apple-system,
+    system-ui,
+    sans-serif;
+}
+/* Klapp-Pfeil; ohne Kinder bleibt der Platz frei, damit die Titel bündig
+   stehen. */
+.archive-arrow {
+  flex: none;
+  width: 16px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  text-align: center;
+}
+.archive-arrow.blank {
+  cursor: default;
+}
+.archive-arrow:hover:not(.blank) {
+  color: var(--text);
+}
+.archive-kids[hidden] {
   display: none;
 }
-.archive-form input {
-  box-sizing: border-box;
-  width: 100%;
-  background: var(--tile);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 6px 10px;
-  color: var(--text);
+/* Ladefehler des Baums — laut statt leerer Kasten. */
+.archive-browse-error {
+  color: #f38ba8;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 6px 8px;
   font:
-    400 12px/1.4 -apple-system,
+    500 13px/1.5 -apple-system,
     system-ui,
     sans-serif;
-  outline: none;
 }
-.archive-form input:focus {
+/* Jede Zeile dauerhaft sichtbar — nichts erscheint erst beim Überfahren. */
+.archive-browse-row {
+  background: var(--tile);
+  border: 1px solid transparent;
+  margin-bottom: 2px;
+}
+.archive-browse-row:hover {
   border-color: var(--line-strong);
 }
-.archive-form input::placeholder {
-  color: var(--faint);
+.archive-browse-row.active {
+  border-color: var(--accent);
+  color: var(--accent);
 }
-.archive-form-submit {
-  border: none;
-  background: var(--line);
-  color: var(--text);
-  border-radius: 6px;
-  padding: 6px 10px;
-  font:
-    500 12px/1.4 -apple-system,
-    system-ui,
-    sans-serif;
+.archive-browse-row .wiki-tree-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.archive-form-submit:hover {
-  background: var(--line-strong);
+.archive-browse-row .wiki-tree-icon svg {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.3;
+}
+.archive-browse-row.active .wiki-tree-icon svg {
+  stroke: var(--accent);
+}
+/* Knopfreihe vom Formular abgesetzt. */
+.archive-form-box .wiki-form-row {
+  border-top: 1px solid var(--line-strong);
+  padding-top: 12px;
+  margin-top: 2px;
 }
 
 /* Sichtbare Fehlermeldung (panelToast), oben rechts über dem Panel-Inhalt. */
@@ -489,4 +1193,127 @@
     500 11px/1.5 -apple-system,
     system-ui,
     sans-serif;
+}
+
+/* ---------- ePub-Viewer (Archiv-Ansicht) ---------- */
+
+/* Buch statt Notiz: die Fläche wird gefüllt und im Buch geblättert, statt
+   die Seite zu scrollen. */
+.wiki-main.epub-mode {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.wiki-note-epub {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.epub {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+.epub-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+.epub-toc {
+  flex: 0 0 190px;
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--line-strong);
+  padding-right: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.epub-toc[hidden] {
+  display: none;
+}
+.epub-toc-item {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  cursor: default;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font:
+    500 12px/1.35 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.epub-toc-item:hover {
+  background: var(--line);
+  color: var(--text);
+}
+/* Seitenfläche: die Buchseite sitzt oben links, ihr Maßstab kommt aus dem
+   Viewer (feste Seiten) — deshalb kein Zentrieren per Flex. */
+.epub-stage {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background: var(--tile);
+  border-radius: 8px;
+}
+.epub-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* Rechter Rand: die Buchseite steht nicht bündig am Panelrand. Der Abstand
+     im Text selbst käme aus dem Buch-CSS, an das der Viewer nicht herankommt. */
+  width: calc(100% - 16px);
+  height: 100%;
+  border: none;
+  background: #fff;
+  transform-origin: top left;
+}
+.epub-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px 8px;
+  color: var(--muted);
+  font:
+    500 12px/1 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.epub-nav {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: default;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 16px;
+  line-height: 1;
+}
+.epub-nav:hover:not(:disabled) {
+  background: var(--line);
+  color: var(--text);
+}
+.epub-nav:disabled {
+  color: var(--faint);
+}
+.epub-count {
+  min-width: 72px;
+  text-align: center;
+}
+.epub-meta {
+  margin-right: auto;
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

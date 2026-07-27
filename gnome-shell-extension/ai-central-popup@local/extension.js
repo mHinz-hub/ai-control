@@ -1,6 +1,6 @@
 /* GNOME Shell Extension (ESM, GNOME 45+)
- * ai-control-popup@local
- * Dünner Relay: Panel-Button -> D-Bus Show() an die ai-control-App, dann das
+ * ai-central-popup@local
+ * Dünner Relay: Panel-Button -> D-Bus Show() an die ai-central-App, dann das
  * rahmenlose Popup-Fenster der App unter den Button schieben (Compositor darf das).
  */
 
@@ -14,10 +14,10 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
-const DBUS_NAME = 'com.aicontrol.Popup';
-const DBUS_PATH = '/com/aicontrol/Popup';
-const DBUS_IFACE = 'com.aicontrol.Popup1';
-const WIN_TITLE = 'ai-control-popup';
+const DBUS_NAME = 'com.aicentral.Popup';
+const DBUS_PATH = '/com/aicentral/Popup';
+const DBUS_IFACE = 'com.aicentral.Popup1';
+const WIN_TITLE = 'ai-central-popup';
 
 export default class AiControlPopupExtension extends Extension {
   enable() {
@@ -56,7 +56,7 @@ export default class AiControlPopupExtension extends Extension {
   _addButton() {
     if (this._button) return;
     // dontCreateMenu=true: wir wollen kein Shell-Menü, nur den Klick relayen.
-    this._button = new PanelMenu.Button(0.0, 'ai-control', true);
+    this._button = new PanelMenu.Button(0.0, 'ai-central', true);
     const icon = new St.Icon({
       // Icon liegt neben der Extension (vom Paket mitgeliefert).
       gicon: Gio.icon_new_for_string(`${this.path}/trayLinux.png`),
@@ -67,7 +67,7 @@ export default class AiControlPopupExtension extends Extension {
       this._toggle();
       return Clutter.EVENT_STOP;
     });
-    Main.panel.addToStatusArea('ai-control-popup', this._button, 0, 'right');
+    Main.panel.addToStatusArea('ai-central-popup', this._button, 0, 'right');
   }
 
   _removeButton() {
@@ -124,7 +124,7 @@ export default class AiControlPopupExtension extends Extension {
     try {
       this._proxy.call_sync(method, null, Gio.DBusCallFlags.NONE, -1, null);
     } catch (e) {
-      logError(e, 'ai-control-popup: D-Bus call failed (App läuft?)');
+      logError(e, 'ai-central-popup: D-Bus call failed (App läuft?)');
     }
   }
 

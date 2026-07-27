@@ -1,26 +1,24 @@
 /// Gemeinsame Panel-Verdrahtung für das angedockte Panel (terminal.ts) und
-/// das abgelöste Fenster (panel.ts): Entwurfs-Ansicht, Befehls- und
-/// Such-Kacheln, Modus-Umschalter, Wikilink-Klick und die drei Update-Events.
-/// Die Element-IDs sind in beiden HTML-Dateien identisch; die Draft-Controls
-/// trägt das Markup als `.draft-only`.
+/// das abgelöste Fenster (panel.ts): die Entwurfs-Ansicht als Kern, alle
+/// weiteren Tabs aus der Modul-Registry (src/modules) — Tab-Knöpfe und
+/// Content-Container entstehen hier aus der Liste der aktiven Module,
+/// Erstbefüllung per buffer_read, Updates über `<buffer>-update`-Events.
+/// Die Element-IDs des Entwurfs-Markups sind in beiden HTML-Dateien
+/// identisch; die Draft-Controls trägt das Markup als `.draft-only`.
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { initPanelView, type PanelView } from "./panel-view";
-import {
-  initCommandsView,
-  initPanelMode,
-  panelToast,
-  type CommandsView,
-  type PanelMode,
-} from "./commands-view";
-import { initSearchView } from "./search-view";
-import { initWikiView } from "./wiki-view";
+import { initPanelMode, type ModeTab, type PanelMode } from "./commands-view";
+import { panelToast } from "./tiles";
+import { PANEL_TABS, type ModuleCtx, type ModuleView } from "./modules";
+import { t } from "./messages";
 import "./panel-tiles.css";
 
 export interface PanelWiring {
   view: PanelView;
-  cmdView: CommandsView;
+  /// Modul-Ansichten nach Tab-Modus; enthält nur Tabs aktiver Module.
+  views: Map<string, ModuleView>;
   mode: { to(m: PanelMode): void; clear(): void; current(): PanelMode | null };
   /// Entwurfstext beim Start (für die Anfangs-Modus-Entscheidung).
   draft: string;
@@ -29,26 +27,26 @@ export interface PanelWiring {
 export async function wirePanel(
   project: string,
   onIncoming?: () => void,
+  standalone = false,
 ): Promise<PanelWiring> {
   const titleEl = document.querySelector(".panel-title") as HTMLElement;
-  const [defaultLang, draft, cmds, search, wiki, archiveHome] = await Promise.all([
+  const [enabled, defaultLang, draft] = await Promise.all([
+    invoke<string[]>("enabled_modules", { project }),
     invoke<string>("spellcheck_lang"),
-    invoke<string>("panel_read", { project }),
-    invoke<string>("commands_read", { project }),
-    invoke<string>("search_read", { project }),
-    invoke<string>("wiki_read", { project }),
-    invoke<string | null>("panel_archive_dir_cmd", { project }),
+    invoke<string>("buffer_read", { project, buffer: "panel" }),
   ]);
+  // Feste Aufgabenteilung: Session-Tabs (ToDo, Befehle) leben im angedockten
+  // Panel, Archiv-Tabs (popupOnly: Archiv, Suche) im eigenen Panel-Fenster.
+  // Im Dock erscheinen die Archiv-Tabs nur als Öffner-Knöpfe (terminal.ts
+  // fängt den Klick und öffnet das Fenster).
+  const tabs = PANEL_TABS.filter((tab) => enabled.includes(tab.module)).filter(
+    (tab) => (standalone ? !!tab.popupOnly : true),
+  );
 
-  // Ohne Archiv (in den Projekt-Einstellungen abgewählt) gibt es nur Befehle
-  // und Dokument — Wiki-/Suche-Tabs und die Archiv-Werkzeuge verschwinden.
-  if (!archiveHome) {
-    for (const sel of [
-      '#panel-tabs [data-mode="wiki"]',
-      '#panel-tabs [data-mode="search"]',
-      "#panel-archive",
-      "#panel-wiki-jump",
-    ]) {
+  // Ohne Archiv-Modul (abgewählt oder kein Archiv-Home) verschwinden auch
+  // die Archiv-Werkzeuge des Entwurfs-Tabs.
+  if (!enabled.includes("archive")) {
+    for (const sel of ["#panel-archive", "#panel-wiki-jump"]) {
       const el = document.querySelector<HTMLElement>(sel)!;
       el.hidden = true;
       // Raus aus der draft-only-Menge, sonst blendet der Modus-Umschalter
@@ -61,7 +59,16 @@ export async function wirePanel(
   // den Kern; das Ergebnis kommt über den Wiki-Puffer und `wiki-update` zurück.
   // Fehler (z. B. Ziel nicht im Archiv) erscheinen als Toast.
   const openWiki = (name: string) =>
-    invoke("wiki_open", { project, name }).catch((e) => panelToast(String(e)));
+    void invoke("wiki_open", { project, name }).catch((e) => panelToast(String(e)));
+
+  const ctx: ModuleCtx = {
+    project,
+    standalone,
+    toast: panelToast,
+    openDoc: (path) =>
+      void invoke("panel_load", { project, path }).catch((e) => panelToast(String(e))),
+    openWiki,
+  };
 
   const view = initPanelView({
     content: document.getElementById("panel-content")!,
@@ -75,57 +82,69 @@ export async function wirePanel(
     onCommit: (text) => invoke("panel_set", { project, text }),
     onWikiLink: openWiki,
   });
-  const cmdView = initCommandsView(
-    document.getElementById("commands-content")!,
-    (id) => invoke("commands_delete", { project, id }),
-  );
-  // Treffer-Klick lädt das Dokument in den Dokument-Tab (dort editier- und
-  // archivierbar); der Sprung ins Wiki geht von dort aus.
-  const searchView = initSearchView(
-    document.getElementById("search-content")!,
-    (path) =>
-      void invoke("panel_load", { project, path }).catch((e) => panelToast(String(e))),
-    (raw) => {
-      // `#tag`-Tokens filtern aufs Schlagwort, der Rest ist die Volltext-Query.
-      const words = raw.split(/\s+/).filter(Boolean);
-      const tag = words.find((w) => w.startsWith("#"))?.slice(1) ?? null;
-      const query = words.filter((w) => !w.startsWith("#")).join(" ");
-      void invoke("search_run", { project, query, tag }).catch((e) =>
-        panelToast(`Suche fehlgeschlagen: ${e}`),
-      );
-    },
-  );
-  const wikiView = initWikiView(document.getElementById("wiki-content")!, openWiki);
+
+  // Tab-Leiste und Container aus der Registry. Die Container-IDs
+  // (`<mode>-content`) sind zugleich die CSS-Anker der Ansichten; die
+  // Container reihen sich hinter #panel-content ein.
+  const tabsEl = document.getElementById("panel-tabs")!;
+  const views = new Map<string, ModuleView>();
+  const modeTabs: ModeTab[] = [];
+  /// Tabs mit eigener Ansicht in DIESER Fläche (Öffner-Knöpfe zählen nicht).
+  const activeTabs: typeof tabs = [];
+  let anchor = document.getElementById("panel-content")!;
+  for (const tab of tabs) {
+    const btn = document.createElement("button");
+    btn.className = "panel-btn";
+    btn.dataset.mode = tab.mode;
+    btn.textContent = t(tab.labelKey);
+    btn.title = t(tab.titleKey);
+    tabsEl.append(btn);
+    if (tab.sepAfter) {
+      const sep = document.createElement("span");
+      sep.className = "tab-sep";
+      tabsEl.append(sep);
+    }
+    // Archiv-Tabs im Dock: nur der Öffner-Knopf, keine Ansicht.
+    if (tab.popupOnly && !standalone) {
+      continue;
+    }
+    activeTabs.push(tab);
+    let content: HTMLElement | null = null;
+    if (tab.init) {
+      content = document.createElement("div");
+      content.id = `${tab.mode}-content`;
+      content.hidden = true;
+      anchor.after(content);
+      anchor = content;
+      views.set(tab.mode, tab.init(content, ctx));
+    }
+    modeTabs.push({
+      mode: tab.mode,
+      btn,
+      content,
+      label: t(tab.labelKey),
+      onActivate: tab.onActivate
+        ? () => tab.onActivate!(views.get(tab.mode)!, ctx)
+        : undefined,
+    });
+  }
   const mode = initPanelMode({
-    tabsEl: document.getElementById("panel-tabs")!,
+    tabs: modeTabs,
     draftEls: [
       document.getElementById("panel-content")!,
       ...document.querySelectorAll<HTMLElement>(".draft-only"),
     ],
-    commandsContent: document.getElementById("commands-content")!,
-    searchContent: document.getElementById("search-content")!,
-    wikiContent: document.getElementById("wiki-content")!,
     titleEl,
     flush: () => void view.flush(),
   });
 
-  view.set(draft);
-  cmdView.set(cmds);
-  searchView.set(search);
-  wikiView.set(wiki);
-
-  // Wiki-Tab bei leerem Puffer (Session-Start): Übersicht direkt laden.
-  document
-    .querySelector<HTMLElement>('#panel-tabs [data-mode="wiki"]')!
-    .addEventListener("click", () => {
-      if (wikiView.empty()) void openWiki("tag:");
-    });
-
-  // Sprung Dokument → Wiki: löst den angezeigten Titel gegen das Archiv auf.
+  // Sprung Dokument → Wiki: öffnet den Archiv-Navigator (Dokumentseiten im
+  // Wiki gibt es nicht mehr — Dokumente öffnen immer im Dokument-Tab).
   document
     .getElementById("panel-wiki-jump")!
-    .addEventListener("click", () => void openWiki(titleEl.textContent || ""));
+    .addEventListener("click", () => openWiki("tag:"));
 
+  view.set(draft);
   await listen<string>("panel-update", (e) => {
     // Erst umschalten, dann setzen: to("draft") restauriert den gemerkten
     // Titel — der neue Inhalt (und damit sein Titel) muss danach kommen.
@@ -133,21 +152,19 @@ export async function wirePanel(
     view.set(e.payload);
     onIncoming?.();
   });
-  await listen<string>("commands-update", (e) => {
-    cmdView.set(e.payload);
-    mode.to("commands");
-    onIncoming?.();
-  });
-  await listen<string>("search-update", (e) => {
-    searchView.set(e.payload);
-    mode.to("search");
-    onIncoming?.();
-  });
-  await listen<string>("wiki-update", (e) => {
-    wikiView.set(e.payload);
-    mode.to("wiki");
-    onIncoming?.();
-  });
+  await Promise.all(
+    activeTabs
+      .filter((tab) => tab.init)
+      .map(async (tab) => {
+        const v = views.get(tab.mode)!;
+        v.set(await invoke<string>("buffer_read", { project, buffer: tab.buffer }));
+        await listen<string>(`${tab.buffer}-update`, (e) => {
+          v.set(e.payload);
+          mode.to(tab.mode);
+          onIncoming?.();
+        });
+      }),
+  );
 
-  return { view, cmdView, mode, draft };
+  return { view, views, mode, draft };
 }

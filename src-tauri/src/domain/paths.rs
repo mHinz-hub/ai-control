@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-/// Dateiname der Projekt-Registry unter ~/.config/ai-control.
+/// Dateiname der Projekt-Registry unter ~/.config/ai-central.
 const PROJECTS_FILE: &str = "projects.json";
 
 /// Wurzelpfade; in Tests mit temporärem home instanziierbar.
@@ -22,7 +22,7 @@ impl Paths {
   }
 
   pub(crate) fn config_dir(&self) -> PathBuf {
-    self.home.join(".config").join("ai-control")
+    self.home.join(".config").join("ai-central")
   }
 
   pub(crate) fn projects_file(&self) -> PathBuf {
@@ -34,7 +34,7 @@ impl Paths {
   }
 
   /// Ehemals gemeinsames Icons-Verzeichnis aller Projekte — Icons liegen jetzt
-  /// im .ai-control/-Ordner des Projekts; hiervon liest nur noch die Migration.
+  /// im .ai-central/-Ordner des Projekts; hiervon liest nur noch die Migration.
   pub(crate) fn icons_dir(&self) -> PathBuf {
     self.config_dir().join("icons")
   }
@@ -59,20 +59,32 @@ impl Paths {
 
 /// Zweite Linie: Die Projekt-ID wird zum Dateinamen der Panel-Kanäle — ein
 /// Wert mit Pfad-Bestandteilen (etwa aus einer verfälschten Registry oder
-/// AI_CONTROL_PROJECT-Env) bricht hier laut ab, statt einen Pfad zu bilden.
+/// AI_CENTRAL_PROJECT-Env) bricht hier laut ab, statt einen Pfad zu bilden.
 fn checked(project: &str) -> &str {
   crate::domain::check_name(project).unwrap();
   project
 }
 
 /// Panel-Datei eines Projekts (Kanal Skill -> Panel). Der Pfad landet als
-/// AI_CONTROL_PANEL in der PTY-Umgebung.
+/// AI_CENTRAL_PANEL in der PTY-Umgebung.
 pub(crate) fn panel_file(project: &str) -> PathBuf {
   Paths::real().panels_dir().join(format!("{}.md", checked(project)))
 }
 
+/// Quell-Verknüpfung des Panel-Inhalts: absoluter Pfad des Archiv-Dokuments,
+/// aus dem der Dokument-Tab gerade geladen ist. Solange sie existiert,
+/// schreibt jeder Editor-Commit den Body dorthin zurück; ein frischer Entwurf
+/// (write_panel, Session-Start) entfernt sie. Liegt neben der Panel-Datei als
+/// `<panel>.source`, damit der MCP-Server sie aus AI_CENTRAL_PANEL ableiten
+/// kann.
+pub(crate) fn panel_source_file(project: &str) -> PathBuf {
+  Paths::real()
+    .panels_dir()
+    .join(format!("{}.md.source", checked(project)))
+}
+
 /// Command-History eines Projekts (JSONL, anhängend — flüchtig, wird beim
-/// Session-Start geleert). Der Pfad landet als AI_CONTROL_COMMANDS in der
+/// Session-Start geleert). Der Pfad landet als AI_CENTRAL_COMMANDS in der
 /// PTY-Umgebung.
 pub(crate) fn commands_file(project: &str) -> PathBuf {
   Paths::real()
@@ -82,7 +94,7 @@ pub(crate) fn commands_file(project: &str) -> PathBuf {
 
 /// Suchtreffer-Datei eines Projekts (JSON, letzter search_archive-Aufruf —
 /// flüchtig, wird beim Session-Start geleert). Der Pfad landet als
-/// AI_CONTROL_SEARCH in der PTY-Umgebung.
+/// AI_CENTRAL_SEARCH in der PTY-Umgebung.
 pub(crate) fn search_file(project: &str) -> PathBuf {
   Paths::real()
     .panels_dir()
@@ -91,11 +103,28 @@ pub(crate) fn search_file(project: &str) -> PathBuf {
 
 /// Wiki-Puffer eines Projekts (JSON, jeweils letzte Wiki-Seite bzw. letztes
 /// geöffnetes Dokument — flüchtig, wird beim Session-Start geleert). Der Pfad
-/// landet als AI_CONTROL_WIKI in der PTY-Umgebung.
+/// landet als AI_CENTRAL_WIKI in der PTY-Umgebung.
 pub(crate) fn wiki_file(project: &str) -> PathBuf {
   Paths::real()
     .panels_dir()
     .join(format!("{}.wiki.json", checked(project)))
+}
+
+/// Puffer des Commit-Fensters: `show_commit` schreibt die Nachrichten-
+/// Vorschläge (JSON, je Repo einer) hinein, der Watcher meldet das dem
+/// Terminal-Fenster, das den Dialog öffnet — der ihn dann liest. Der Pfad
+/// landet als AI_CENTRAL_COMMIT in der PTY-Umgebung.
+pub(crate) fn commit_file(project: &str) -> PathBuf {
+  Paths::real().panels_dir().join(format!("{}.commit", checked(project)))
+}
+
+/// Persistente ToDo-Liste eines Projekts (JSONL, anhängend — überlebt
+/// Sessions; write_todos hängt an, Kachel-Löschen entfernt Zeilen). Der Pfad
+/// landet als AI_CENTRAL_TODOS in der PTY-Umgebung.
+pub(crate) fn todos_file(project: &str) -> PathBuf {
+  Paths::real()
+    .panels_dir()
+    .join(format!("{}.todos.jsonl", checked(project)))
 }
 
 /// "~" bzw. "~/x" relativ zum Home auflösen; alles andere unverändert.

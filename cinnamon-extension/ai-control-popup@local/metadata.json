@@ -1,7 +1,0 @@
-{
-  "uuid": "ai-control-popup@local",
-  "name": "ai-control popup placement",
-  "description": "ai-control-Tray-Popup: platziert es unter Wayland am Mauszeiger und gibt ihm unter X11 den initialen Fokus (Focus-Stealing-Prevention).",
-  "cinnamon-version": ["6.0", "6.2", "6.4", "6.6"],
-  "version": 1
-}

@@ -16,12 +16,12 @@ use crate::domain::pool::{
 use crate::domain::project::{
   add_project_in, add_work_dir_in, assign_pool_in, create_project_full_in, delete_preview_in,
   delete_project_scoped_in, display_name_in, is_running, kill_terminals, list_projects_in,
-  project_work_dirs_in, read_project_config_in, remove_work_dir_in, resolve_icon_path,
+  project_roots_in, project_work_dirs_in, read_project_config_in, remove_work_dir_in,
+  resolve_icon_path,
   running_projects_using_pool, set_project_dir_in, set_terminal_config_in, unassign_pool_in,
   DeletePreview, Project, TerminalConfig,
 };
 use crate::domain::settings;
-use crate::domain::todo::{set_todo_in, todo_state_in};
 use crate::domain::usage::{usage_stats_in, UsageRow};
 use crate::platform::KeychainStore;
 use crate::terminal;
@@ -41,7 +41,6 @@ pub(crate) fn create_project_full(
   work_dir: Option<String>,
   create_work_dir: bool,
   terminal: TerminalConfig,
-  todo: bool,
 ) -> Result<String, String> {
   create_project_full_in(
     &Paths::real(),
@@ -51,7 +50,6 @@ pub(crate) fn create_project_full(
     work_dir.as_deref(),
     create_work_dir,
     terminal,
-    todo,
   )
 }
 
@@ -61,13 +59,19 @@ pub(crate) fn add_project(path: String) -> Result<(), String> {
   add_project_in(&Paths::real(), &path)
 }
 
+/// Umbau-Sperre: eine laufende Session des Projekts zuerst beenden.
+fn ensure_not_running(project: &str) -> Result<(), String> {
+  if is_running(project) {
+    let name = display_name_in(&Paths::real(), project)?;
+    return Err(format!("{name} läuft noch — erst beenden"));
+  }
+  Ok(())
+}
+
 /// Projektordner neu zuordnen; bei laufender Session gesperrt.
 #[tauri::command]
 pub(crate) fn set_project_dir(project: String, dir: String) -> Result<(), String> {
-  if is_running(&project) {
-    let name = display_name_in(&Paths::real(), &project)?;
-    return Err(format!("{name} läuft noch — erst beenden"));
-  }
+  ensure_not_running(&project)?;
   set_project_dir_in(&Paths::real(), &project, &dir)
 }
 
@@ -87,7 +91,7 @@ pub(crate) fn delete_preview(project: String) -> Result<DeletePreview, String> {
   delete_preview_in(&Paths::real(), &project)
 }
 
-/// Löschen in drei Stufen: "integration" (nur ai-control-Spuren),
+/// Löschen in drei Stufen: "integration" (nur ai-central-Spuren),
 /// "archive" (zusätzlich Archiv), "full" (zusätzlich Projektordner,
 /// Arbeitsordner per Flag).
 #[tauri::command]
@@ -96,26 +100,13 @@ pub(crate) fn delete_project_scoped(
   scope: String,
   delete_work_dirs: bool,
 ) -> Result<(), String> {
-  if is_running(&project) {
-    let name = display_name_in(&Paths::real(), &project)?;
-    return Err(format!("{name} läuft noch — erst beenden"));
-  }
+  ensure_not_running(&project)?;
   delete_project_scoped_in(&Paths::real(), &project, &scope, delete_work_dirs)
 }
 
 #[tauri::command]
 pub(crate) fn project_work_dirs(project: String) -> Result<Vec<String>, String> {
   project_work_dirs_in(&Paths::real(), &project)
-}
-
-#[tauri::command]
-pub(crate) fn todo_state(project: String) -> Result<bool, String> {
-  todo_state_in(&Paths::real(), &project)
-}
-
-#[tauri::command]
-pub(crate) fn set_todo(project: String, enabled: bool) -> Result<(), String> {
-  set_todo_in(&Paths::real(), &project, enabled)
 }
 
 #[tauri::command]
@@ -301,6 +292,18 @@ pub(crate) fn restart_project(app: tauri::AppHandle, project: String) -> Result<
   terminal::open_terminal(app, project)
 }
 
+/// Projekt ohne Pool: Hauptfenster nach vorn holen und dort die Pool-Auswahl
+/// öffnen. Aus dem Tray heraus gibt es sonst keinen Ort für die Wahl — und
+/// still den Default zu nehmen ist genau das, was die Pool-Pflicht verhindert.
+fn request_pool_choice(app: &tauri::AppHandle, project: &str) {
+  use tauri::{Emitter, Manager};
+  if let Some(w) = app.get_webview_window("main") {
+    let _ = w.show();
+    let _ = w.set_focus();
+  }
+  let _ = app.emit("pool-required", project);
+}
+
 /// Tray-Klick auf ein Projekt: läuft es, kommt das Terminal-Fenster nach vorn,
 /// sonst startet es.
 fn start_or_focus(app: &tauri::AppHandle, project: &str) {
@@ -308,7 +311,11 @@ fn start_or_focus(app: &tauri::AppHandle, project: &str) {
     Some(pid) => crate::platform::focus_terminal(*pid),
     None => {
       if let Err(e) = terminal::open_terminal(app.clone(), project.to_string()) {
-        eprintln!("{project} starten: {e}");
+        if e == crate::domain::project::NO_POOL {
+          request_pool_choice(app, project);
+        } else {
+          eprintln!("{project} starten: {e}");
+        }
       }
     }
   }
@@ -381,6 +388,34 @@ pub(crate) fn panel_archive_dir_cmd(project: String) -> Option<String> {
   project_archive_home(&project).map(|p| p.display().to_string())
 }
 
+/// Modul-Registry für den Settings-Dialog (Checkbox-Gruppe „Module").
+#[tauri::command]
+pub(crate) fn module_registry(project: String) -> Result<Vec<crate::domain::modules::ModuleInfo>, String> {
+  crate::domain::modules::module_infos_in(&Paths::real(), &project)
+}
+
+/// Schaltet ein Modul im Projekt an/ab (Settings-Dialog, schreibt sofort).
+#[tauri::command]
+pub(crate) fn set_module(project: String, module: String, enabled: bool) -> Result<(), String> {
+  crate::domain::modules::set_module_in(&Paths::real(), &project, &module, enabled)
+}
+
+/// Aktive Module fürs Frontend: Registry-Enablement der Projekt-Config plus
+/// `requires_archive` — ohne konfiguriertes Archiv-Home fallen Archiv-Module
+/// weg, ihre Tabs erscheinen nicht.
+#[tauri::command]
+pub(crate) fn enabled_modules(project: String) -> Result<Vec<String>, String> {
+  let paths = Paths::real();
+  let has_archive = read_project_config_in(&paths, &project)?.archive_home.is_some();
+  Ok(
+    crate::domain::modules::active_in(&paths, &project)?
+      .iter()
+      .filter(|m| !m.requires_archive || has_archive)
+      .map(|m| m.id.to_string())
+      .collect(),
+  )
+}
+
 /// Setzt das Archiv-Home eines Projekts (Einstellungsdialog) — inklusive
 /// Permissions-Eintrag in der Projekt-settings.json.
 #[tauri::command]
@@ -414,16 +449,41 @@ pub(crate) fn clear_archive_home_cmd(project: String) -> Result<(), String> {
 pub(crate) fn panel_archive_cmd(
   project: String,
   dir: Option<String>,
+  title: Option<String>,
   folder: Option<String>,
   description: Option<String>,
   tags: Option<Vec<String>>,
 ) -> Result<String, String> {
+  // Der Zielordner kommt als Knoten-ID; erst hier wird daraus ein Pfad.
+  let folder = match folder.filter(|f| !f.trim().is_empty()) {
+    Some(id) => {
+      let home = require_archive_home(&project)?;
+      let rel = crate::domain::archive_index::resolve_id(&home, &id)?;
+      let stem = std::path::Path::new(&rel)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+      Some(match rel.rsplit_once('/') {
+        Some((head, _)) => format!("{head}/{stem}"),
+        None => stem,
+      })
+    }
+    None => None,
+  };
   let meta = ArchiveMeta {
-    folder: folder.filter(|f| !f.trim().is_empty()),
+    title: title.filter(|t| !t.trim().is_empty()),
+    folder,
     description: description.filter(|d| !d.trim().is_empty()),
     tags: tags.unwrap_or_default(),
   };
   archive_panel_content(&project, dir.as_deref(), &meta).map(|p| p.display().to_string())
+}
+
+/// Titel-Vorbelegung fürs Archiv-Formular: erste Überschrift des Entwurfs.
+#[tauri::command]
+pub(crate) fn panel_title_cmd(project: String) -> String {
+  crate::domain::archive::panel_title(&project)
 }
 
 /// Dokumentliste des Archiv-Index (frisch gescannt) fürs Panel.
@@ -439,4 +499,67 @@ pub(crate) fn archive_docs_cmd(
 #[tauri::command]
 pub(crate) fn reveal_path_cmd(path: String) {
   crate::platform::reveal_path(std::path::Path::new(&path));
+}
+
+// ---------- Commit-Dialog ----------
+
+/// Repos des Projekts mit Branch, Upstream und geänderten Dateien.
+///
+/// Alle vier Commands sind `async`: Tauri führt synchrone Commands auf dem
+/// Main-Thread aus, und `push --dry-run` wie `push` warten aufs Netz — das
+/// legte für die Dauer jedes Roundtrips alle Fenster des Prozesses still und
+/// machte aus der nebenläufigen Push-Prüfung des Dialogs eine Reihe.
+#[tauri::command]
+pub(crate) async fn git_repos(
+  project: String,
+) -> Result<Vec<crate::domain::git::Repo>, String> {
+  let paths = Paths::real();
+  crate::domain::git::repos(&project_roots_in(&paths, &project)?)
+}
+
+/// Unified-Diff einer Datei gegen HEAD.
+#[tauri::command]
+pub(crate) async fn git_diff(
+  project: String,
+  dir: String,
+  path: String,
+  untracked: bool,
+) -> Result<String, String> {
+  let paths = Paths::real();
+  crate::domain::git::diff(
+    &crate::domain::git::repo_of(&project_roots_in(&paths, &project)?, &dir)?,
+    &path,
+    untracked,
+  )
+}
+
+/// Push-Vorprüfung (Trockenlauf) für ein Repo.
+#[tauri::command]
+pub(crate) async fn git_push_check(
+  project: String,
+  dir: String,
+) -> Result<crate::domain::git::PushCheck, String> {
+  let paths = Paths::real();
+  crate::domain::git::push_check(&crate::domain::git::repo_of(
+    &project_roots_in(&paths, &project)?,
+    &dir,
+  )?)
+}
+
+/// Ausgewählte Dateien committen, auf Wunsch anschließend pushen.
+#[tauri::command]
+pub(crate) async fn git_commit(
+  project: String,
+  dir: String,
+  files: Vec<String>,
+  message: String,
+  push: bool,
+) -> Result<crate::domain::git::CommitDone, String> {
+  let paths = Paths::real();
+  crate::domain::git::commit(
+    &crate::domain::git::repo_of(&project_roots_in(&paths, &project)?, &dir)?,
+    &files,
+    &message,
+    push,
+  )
 }

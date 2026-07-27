@@ -12,7 +12,9 @@ use crate::domain::archive_index::scan_with_bodies;
 
 #[derive(serde::Serialize)]
 pub(crate) struct Hit {
-  /// Pfad relativ zum Archiv-Home.
+  /// Technische ID der Notiz — Adressat des Treffer-Sprungs.
+  pub(crate) id: String,
+  /// Pfad relativ zum Archiv-Home (Anzeige).
   pub(crate) relpath: String,
   pub(crate) title: String,
   /// Textausschnitt um die Fundstelle, Treffer in `**…**`.
@@ -45,13 +47,18 @@ pub(crate) fn search(
   let conn = build_index(home)?;
   let mut stmt = conn
     .prepare(
-      "SELECT relpath, title, snippet(docs, 5, '**', '**', ' … ', 12) \
+      "SELECT id, relpath, title, snippet(docs, 6, '**', '**', ' … ', 12) \
        FROM docs WHERE docs MATCH ?1 ORDER BY rank LIMIT ?2",
     )
     .map_err(|e| e.to_string())?;
   let rows = stmt
     .query_map(rusqlite::params![expr, limit as i64], |row| {
-      Ok(Hit { relpath: row.get(0)?, title: row.get(1)?, snippet: row.get(2)? })
+      Ok(Hit {
+        id: row.get(0)?,
+        relpath: row.get(1)?,
+        title: row.get(2)?,
+        snippet: row.get(3)?,
+      })
     })
     .map_err(|e| format!("Suchausdruck „{query}“: {e}"))?;
   rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
@@ -59,7 +66,7 @@ pub(crate) fn search(
 
 /// Übersetzt die Nutzereingabe in einen FTS5-Ausdruck, der nicht scheitern kann.
 ///
-/// Roh durchgereicht ist fast jede natürliche Eingabe ein Syntaxfehler: `ai-control`
+/// Roh durchgereicht ist fast jede natürliche Eingabe ein Syntaxfehler: `ai-central`
 /// liest FTS5 als Spaltenfilter (`no such column: control`), `C++` und eine offene
 /// Klammer brechen den Parser. Die Live-Suche schickt zudem jeden Zwischenstand beim
 /// Tippen ab, also auch das halbe `"Phrase`. Darum wird jedes Wort als Phrase
@@ -103,16 +110,17 @@ fn build_index(home: &Path) -> Result<Connection, String> {
   let conn = Connection::open_in_memory().map_err(|e| e.to_string())?;
   conn
     .execute_batch(
-      "CREATE VIRTUAL TABLE docs USING fts5(relpath UNINDEXED, name, title, description, tags, body)",
+      "CREATE VIRTUAL TABLE docs USING fts5(id UNINDEXED, relpath UNINDEXED, name, title, description, tags, body)",
     )
     .map_err(|e| e.to_string())?;
   let docs = scan_with_bodies(home)?;
   let mut insert = conn
-    .prepare("INSERT INTO docs (relpath, name, title, description, tags, body) VALUES (?1, ?2, ?3, ?4, ?5, ?6)")
+    .prepare("INSERT INTO docs (id, relpath, name, title, description, tags, body) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)")
     .map_err(|e| e.to_string())?;
   for (doc, body) in &docs {
     insert
       .execute(rusqlite::params![
+        doc.id,
         doc.relpath,
         doc.name,
         doc.title,
@@ -187,7 +195,7 @@ mod tests {
   fn sonderzeichen_werfen_keinen_syntaxfehler() {
     let home = archiv();
     let eingaben = [
-      "ai-control",
+      "ai-central",
       "adr-log",
       "TODO: fix",
       "C++",

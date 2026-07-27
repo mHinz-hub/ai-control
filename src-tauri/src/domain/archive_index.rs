@@ -8,20 +8,28 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::domain::archive::{
-  parse_frontmatter, parse_tag_list, slugify, strip_frontmatter, strip_stamp,
-};
+use crate::domain::archive::{parse_frontmatter, parse_tag_list, slugify, strip_stamp};
 
 #[derive(serde::Serialize, Clone)]
 pub(crate) struct Doc {
-  /// Pfad relativ zum Archiv-Home.
+  /// Technische ID aus dem Frontmatter — bleibt über Umbenennen und
+  /// Verschieben hinweg gleich; alle Verweise laufen darüber.
+  pub(crate) id: String,
+  /// Pfad relativ zum Archiv-Home (Eigenschaft, keine Identität).
   pub(crate) relpath: String,
+  /// Notiz-Typ: `md` oder `html` — bestimmt Anzeige und Editor.
+  pub(crate) kind: &'static str,
   /// Wikilink-Name: Datei-Stem ohne führenden Zeitstempel.
   pub(crate) name: String,
   /// Frontmatter-Titel, sonst der Name.
   pub(crate) title: String,
   pub(crate) description: Option<String>,
   pub(crate) tags: Vec<String>,
+  /// Frontmatter-`created` (ISO) — Datumsquelle für Dokumente ohne
+  /// Zeitstempel im Dateinamen.
+  pub(crate) created: Option<String>,
+  /// Letzte Änderung (Datei-mtime, `YYYY-MM-DD`).
+  pub(crate) modified: String,
   /// Wikilink-Ziele im Dokumenttext (`[[ziel]]`/`[[ziel|label]]`, nur das Ziel).
   pub(crate) links: Vec<String>,
   /// Namen der Dokumente, die per Wikilink hierher zeigen.
@@ -85,33 +93,96 @@ fn walk(home: &Path, dir: &Path, docs: &mut Vec<(Doc, String)>) -> Result<(), St
     }
     if path.is_dir() {
       walk(home, &path, docs)?;
-    } else if fname.ends_with(".md") {
+    } else if fname.ends_with(".md") || fname.ends_with(".html") {
       docs.push(read_doc(home, &path)?);
+    } else if fname.ends_with(".epub") {
+      docs.push(read_book(home, &path)?);
     }
   }
   Ok(())
 }
 
-fn read_doc(home: &Path, path: &Path) -> Result<(Doc, String), String> {
-  let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+/// Letzte Änderung als `YYYY-MM-DD`.
+fn modified(path: &Path) -> Result<String, String> {
+  let mtime = fs::metadata(path)
+    .and_then(|m| m.modified())
+    .map_err(|e| format!("{}: {e}", path.display()))?
+    .duration_since(std::time::UNIX_EPOCH)
+    .map_err(|e| e.to_string())?
+    .as_secs();
+  Ok(crate::domain::archive::utc_stamp(mtime).1[..10].to_string())
+}
+
+/// Ein Buch (`.epub`) im Archiv: Eintrag im Baum, kein Notiz-Inhalt. Seine
+/// Identität ist der Pfad — in eine Binärdatei lässt sich kein Frontmatter
+/// schreiben, und die Invarianten des Notizmodells (ensure_ids,
+/// ensure_node_texts) fassen Bücher darum auch nicht an. Der Titel kommt aus
+/// dem Dateinamen; die Metadaten im Buch liest erst der Viewer.
+fn read_book(home: &Path, path: &Path) -> Result<(Doc, String), String> {
+  let relpath = path
+    .strip_prefix(home)
+    .map_err(|e| format!("{}: {e}", path.display()))?
+    .display()
+    .to_string();
   let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
   let name = strip_stamp(&stem).to_string();
-  let fm = parse_frontmatter(&text);
+  let doc = Doc {
+    id: format!("epub:{relpath}"),
+    relpath,
+    kind: "epub",
+    title: name.clone(),
+    name,
+    description: None,
+    tags: Vec::new(),
+    created: None,
+    modified: modified(path)?,
+    links: Vec::new(),
+    backlinks: Vec::new(),
+  };
+  Ok((doc, String::new()))
+}
+
+fn read_doc(home: &Path, path: &Path) -> Result<(Doc, String), String> {
+  let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+  let modified = modified(path)?;
+  let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+  let name = strip_stamp(&stem).to_string();
+  let html = path.extension().is_some_and(|e| e == "html");
+  let kind = if html { "html" } else { "md" };
+  // Beide Typen tragen dieselben Angaben, nur an ihrer jeweils üblichen
+  // Stelle: Markdown im Frontmatter, HTML in <title>/<meta>.
+  let fm = if html {
+    crate::domain::archive_html::parse_meta(&text)
+  } else {
+    parse_frontmatter(&text)
+  };
   let relpath = path
     .strip_prefix(home)
     .map_err(|e| format!("{}: {e}", path.display()))?
     .display()
     .to_string();
   let doc = Doc {
+    id: fm.get("id").cloned().unwrap_or_default(),
     relpath,
     title: fm.get("title").unwrap_or(&name).clone(),
     description: fm.get("description").cloned(),
-    tags: fm.get("tags").map(|t| parse_tag_list(t)).unwrap_or_default(),
+    tags: fm
+      .get(if html { "keywords" } else { "tags" })
+      .map(|t| parse_tag_list(t))
+      .unwrap_or_default(),
+    created: fm.get("created").cloned(),
     links: wikilinks(&text),
     backlinks: Vec::new(),
+    modified,
+    kind,
     name,
   };
-  Ok((doc, text))
+  let indexed = if html {
+    crate::domain::archive_html::strip_tags(&text)
+  } else {
+    text
+  };
+  Ok((doc, indexed))
 }
 
 /// Slug-Vergleich eines Wikilink-Ziels gegen Name, Titel und Datei-Stem.
@@ -134,9 +205,6 @@ pub(crate) struct WikiPage {
   pub(crate) tag: Option<String>,
   pub(crate) total: usize,
   pub(crate) tags: Vec<TagCount>,
-  /// Die neuesten Dokumente über alle Ordner; leer, wenn es nur einen
-  /// Ordner gibt (dann wäre die Sektion eine Dublette der Liste).
-  pub(crate) recent: Vec<WikiDocEntry>,
   pub(crate) folders: Vec<WikiFolder>,
 }
 
@@ -155,6 +223,13 @@ pub(crate) struct WikiFolder {
 
 #[derive(serde::Serialize)]
 pub(crate) struct WikiDocEntry {
+  /// Technische ID — Adressat aller Aktionen.
+  pub(crate) id: String,
+  /// Notiz-Typ (`md`/`html`) — Symbol im Baum, Anzeige und Editor.
+  pub(crate) kind: &'static str,
+  /// Pfad relativ zum Archiv-Home — Sprung ins Dokument und Adressat der
+  /// Zeilen-Aktionen (umbenennen, löschen).
+  pub(crate) relpath: String,
   pub(crate) name: String,
   pub(crate) title: String,
   pub(crate) description: Option<String>,
@@ -163,6 +238,8 @@ pub(crate) struct WikiDocEntry {
   pub(crate) date: Option<String>,
   /// Zahl der Dokumente, die per Wikilink hierher zeigen.
   pub(crate) backlinks: usize,
+  /// Letzte Änderung (Datei-mtime, `YYYY-MM-DD`).
+  pub(crate) modified: String,
 }
 
 pub(crate) fn archive_page(home: &Path, tag: Option<&str>) -> Result<WikiPage, String> {
@@ -179,6 +256,16 @@ pub(crate) fn archive_page(home: &Path, tag: Option<&str>) -> Result<WikiPage, S
   };
   let mut folders: std::collections::BTreeMap<String, Vec<&Doc>> =
     std::collections::BTreeMap::new();
+  // Die Übersicht führt alle Ordner, auch dokumentlose — der Navigator zeigt
+  // frisch angelegte Ordner sonst nicht. Schlagwort-Seiten bleiben auf die
+  // Treffer-Ordner beschränkt.
+  if tag.is_none() {
+    let mut dirs = Vec::new();
+    folder_paths(home, home, &mut dirs)?;
+    for d in dirs {
+      folders.entry(d).or_default();
+    }
+  }
   for doc in &selected {
     let folder = Path::new(&doc.relpath)
       .parent()
@@ -186,17 +273,6 @@ pub(crate) fn archive_page(home: &Path, tag: Option<&str>) -> Result<WikiPage, S
       .unwrap_or_default();
     folders.entry(folder).or_default().push(doc);
   }
-  let recent = if folders.len() > 1 {
-    // Neueste zuerst über alle Ordner — der Zeitstempel-Stem sortiert
-    // chronologisch, verglichen wird der Dateiname.
-    let mut all = selected.clone();
-    all.sort_by(|a, b| {
-      Path::new(&b.relpath).file_name().cmp(&Path::new(&a.relpath).file_name())
-    });
-    all.into_iter().take(5).map(doc_entry).collect()
-  } else {
-    Vec::new()
-  };
   Ok(WikiPage {
     kind: "page",
     home: home.display().to_string(),
@@ -206,7 +282,6 @@ pub(crate) fn archive_page(home: &Path, tag: Option<&str>) -> Result<WikiPage, S
       .into_iter()
       .map(|(name, count)| TagCount { name: name.to_string(), count })
       .collect(),
-    recent,
     folders: folders
       .into_iter()
       .map(|(name, mut list)| {
@@ -218,54 +293,117 @@ pub(crate) fn archive_page(home: &Path, tag: Option<&str>) -> Result<WikiPage, S
   })
 }
 
+/// Ordner-Knoten für den Zielordner-Baum des Archiv-Dialogs: Pfad plus
+/// Anzeige-Titel aus dem Knotentext (`<name>.md`/`.html` daneben) — dieselbe
+/// logische Sicht wie die Archiv-Ansicht.
+#[derive(serde::Serialize)]
+pub(crate) struct FolderNode {
+  /// Technische ID des Knotentexts — Adressat der Auswahl.
+  pub(crate) id: String,
+  /// Pfad relativ zum Archiv-Home (nur Eigenschaft).
+  pub(crate) path: String,
+  /// Titel des Knotentexts, sonst der Ordnername.
+  pub(crate) title: String,
+}
+
+pub(crate) fn folder_nodes(home: &Path) -> Result<Vec<FolderNode>, String> {
+  let mut paths = Vec::new();
+  folder_paths(home, home, &mut paths)?;
+  paths.sort();
+  let mut out = Vec::new();
+  for path in paths {
+    let name = Path::new(&path)
+      .file_name()
+      .unwrap_or_default()
+      .to_string_lossy()
+      .to_string();
+    // Knotentext daneben: erst .md, dann .html.
+    let fm = ["md", "html"]
+      .iter()
+      .map(|ext| home.join(&path).with_extension(ext))
+      .find(|p| p.is_file())
+      .and_then(|p| Some((p.extension()?.to_string_lossy().to_string(), fs::read_to_string(p).ok()?)))
+      .map(|(ext, text)| {
+        if ext == "html" {
+          crate::domain::archive_html::parse_meta(&text)
+        } else {
+          parse_frontmatter(&text)
+        }
+      })
+      .unwrap_or_default();
+    let title = fm.get("title").cloned().unwrap_or_else(|| name.clone());
+    let id = fm.get("id").cloned().unwrap_or_default();
+    out.push(FolderNode { id, path, title });
+  }
+  Ok(out)
+}
+
+/// Alle Ordner-Relpaths unterhalb von `dir`, rekursiv; versteckte Einträge
+/// (Punkt-Präfix) bleiben außen vor — wie beim Dokument-Scan.
+pub(crate) fn folder_paths(home: &Path, dir: &Path, out: &mut Vec<String>) -> Result<(), String> {
+  let entries = fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+  for entry in entries {
+    let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
+    let path = entry.path();
+    if entry.file_name().to_string_lossy().starts_with('.') || !path.is_dir() {
+      continue;
+    }
+    out.push(path.strip_prefix(home).unwrap().display().to_string());
+    folder_paths(home, &path, out)?;
+  }
+  Ok(())
+}
+
 fn doc_entry(doc: &Doc) -> WikiDocEntry {
   let stem = Path::new(&doc.relpath)
     .file_stem()
     .unwrap_or_default()
     .to_string_lossy()
     .to_string();
-  let date = (stem != doc.name).then(|| stem[..10].to_string());
+  // Zeitstempel im Dateinamen, sonst der Frontmatter-`created`-Tag —
+  // im Navigator angelegte Dokumente tragen das Datum nur dort.
+  let date = (stem != doc.name)
+    .then(|| stem[..10].to_string())
+    .or_else(|| {
+      doc
+        .created
+        .as_ref()
+        .filter(|c| c.len() >= 10)
+        .map(|c| c[..10].to_string())
+    });
   WikiDocEntry {
+    id: doc.id.clone(),
+    kind: doc.kind,
+    relpath: doc.relpath.clone(),
     name: doc.name.clone(),
     title: doc.title.clone(),
     description: doc.description.clone(),
     tags: doc.tags.clone(),
     date,
     backlinks: doc.backlinks.len(),
+    modified: doc.modified.clone(),
   }
 }
 
-/// Ein Archiv-Dokument als Wiki-Ansicht: Markdown-Rumpf ohne Frontmatter plus
-/// Metadaten und Backlinks aus dem Scan.
-#[derive(serde::Serialize)]
-pub(crate) struct WikiDocPage {
-  pub(crate) kind: &'static str,
-  pub(crate) home: String,
-  pub(crate) relpath: String,
-  pub(crate) name: String,
-  pub(crate) title: String,
-  pub(crate) tags: Vec<String>,
-  pub(crate) backlinks: Vec<String>,
-  pub(crate) markdown: String,
+/// Löst eine technische ID auf den aktuellen relpath auf.
+pub(crate) fn resolve_id(home: &Path, id: &str) -> Result<String, String> {
+  scan_archive(home)?
+    .into_iter()
+    .find(|d| d.id == id)
+    .map(|d| d.relpath)
+    .ok_or_else(|| format!("keine Notiz mit ID {id}"))
 }
 
-pub(crate) fn wiki_doc(home: &Path, target: &str) -> Result<WikiDocPage, String> {
-  let pairs = scan_with_bodies(home)?;
+/// Löst ein Wikilink-Ziel (Name, Titel oder Datei-Stem) gegen das Archiv auf
+/// und liefert den relpath des Dokuments.
+pub(crate) fn resolve_doc(home: &Path, target: &str) -> Result<String, String> {
+  let docs = scan_archive(home)?;
   let want = slugify(target);
-  let (doc, body) = pairs
+  docs
     .iter()
-    .find(|(d, _)| matches(d, &want))
-    .ok_or_else(|| format!("kein Archiv-Dokument zu „{target}“ gefunden"))?;
-  Ok(WikiDocPage {
-    kind: "doc",
-    home: home.display().to_string(),
-    relpath: doc.relpath.clone(),
-    name: doc.name.clone(),
-    title: doc.title.clone(),
-    tags: doc.tags.clone(),
-    backlinks: doc.backlinks.clone(),
-    markdown: strip_frontmatter(body).to_string(),
-  })
+    .find(|d| matches(d, &want))
+    .map(|d| d.relpath.clone())
+    .ok_or_else(|| format!("kein Archiv-Dokument zu „{target}“ gefunden"))
 }
 
 /// Alle `[[ziel]]`-Vorkommen im Text, in Dokumentreihenfolge; bei
@@ -358,14 +496,38 @@ mod tests {
     assert_eq!(adr.title, "ADR Logging");
     assert_eq!(adr.description.as_deref(), Some("Logging vereinheitlichen"));
     assert_eq!(adr.date.as_deref(), Some("2026-07-19"));
+    assert_eq!(adr.relpath, "2026-07-19_1000-adr-logging.md");
     assert_eq!(page.folders[1].name, "konzepte");
     assert_eq!(page.folders[1].docs[0].name, "notiz-deploy");
-    // Zwei Ordner → Zuletzt-Sektion, neuestes Dokument zuerst, mit
-    // Backlink-Zähler aus dem Scan.
-    let recent: Vec<&str> = page.recent.iter().map(|d| d.name.as_str()).collect();
-    assert_eq!(recent, vec!["notiz-deploy", "adr-logging"]);
-    assert_eq!(page.recent[0].backlinks, 1);
-    assert_eq!(page.recent[1].backlinks, 0);
+    assert_eq!(page.folders[1].docs[0].backlinks, 1);
+  }
+
+  #[test]
+  fn leere_ordner_und_created_datum() {
+    let home = archiv();
+    fs::create_dir_all(home.join("leer/unter")).unwrap();
+    write(
+      &home,
+      "notiz-plain.md",
+      "---\ntitle: \"Plain\"\ncreated: 2026-07-23T10:00:00Z\n---\n\nText.\n",
+    );
+    let page = archive_page(&home, None).unwrap();
+    let names: Vec<&str> = page.folders.iter().map(|f| f.name.as_str()).collect();
+    // Dokumentlose Ordner erscheinen (Navigator), versteckte weiterhin nicht.
+    assert!(names.contains(&"leer"));
+    assert!(names.contains(&"leer/unter"));
+    assert!(!names.iter().any(|n| n.starts_with(".versteckt")));
+    // Ohne Zeitstempel im Namen kommt das Datum aus dem Frontmatter-created.
+    let plain = page
+      .folders
+      .iter()
+      .find(|f| f.name.is_empty())
+      .unwrap()
+      .docs
+      .iter()
+      .find(|d| d.name == "notiz-plain")
+      .unwrap();
+    assert_eq!(plain.date.as_deref(), Some("2026-07-23"));
   }
 
   #[test]
@@ -381,20 +543,17 @@ mod tests {
   }
 
   #[test]
-  fn wiki_doc_mit_rumpf_und_backlinks() {
+  fn resolve_ueber_name_titel_und_stem() {
     let home = archiv();
     // Auflösung über Titel; Name und Stem gehen über dieselben Slug-Vergleiche.
-    let doc = wiki_doc(&home, "Notiz Deploy").unwrap();
-    assert_eq!(doc.kind, "doc");
-    assert_eq!(doc.name, "notiz-deploy");
     assert_eq!(
-      wiki_doc(&home, "2026-07-19_1000-adr-logging").unwrap().name,
-      "adr-logging"
+      resolve_doc(&home, "Notiz Deploy").unwrap(),
+      "konzepte/2026-07-19_1005-notiz-deploy.md"
     );
-    assert_eq!(doc.title, "Notiz Deploy");
-    assert_eq!(doc.relpath, "konzepte/2026-07-19_1005-notiz-deploy.md");
-    assert_eq!(doc.backlinks, vec!["adr-logging"]);
-    assert_eq!(doc.markdown, "Text ohne Links.\n");
-    assert!(wiki_doc(&home, "fehlt").is_err());
+    assert_eq!(
+      resolve_doc(&home, "2026-07-19_1000-adr-logging").unwrap(),
+      "2026-07-19_1000-adr-logging.md"
+    );
+    assert!(resolve_doc(&home, "fehlt").is_err());
   }
 }

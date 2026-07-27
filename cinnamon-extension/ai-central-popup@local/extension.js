@@ -1,5 +1,5 @@
 /* Cinnamon-Extension (CJS, Muffin/Meta-0)
- * ai-control-popup@local
+ * ai-central-popup@local
  *
  * Das Tray-Icon kommt unter Cinnamon über SNI (xapp), die App zeigt das
  * Popup selbst. Die Extension ergänzt, was der Client nicht kann:
@@ -14,7 +14,7 @@
 
 const Meta = imports.gi.Meta;
 
-const WIN_TITLE = 'ai-control-popup';
+const WIN_TITLE = 'ai-central-popup';
 
 let mapId = 0;
 

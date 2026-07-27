@@ -24,3 +24,16 @@ Object.defineProperty(window, "localStorage", {
     },
   },
 });
+
+/// happy-dom kennt keinen ResizeObserver; der ePub-Viewer misst damit seine
+/// Fläche. Ein Stub ohne Messungen reicht — die Skalierung fester Seiten
+/// hängt an Layoutgrößen, die es in der Testumgebung ohnehin nicht gibt.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+Object.defineProperty(window, "ResizeObserver", {
+  configurable: true,
+  value: ResizeObserverStub,
+});

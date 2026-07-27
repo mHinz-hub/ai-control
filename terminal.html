@@ -8,15 +8,14 @@
     <header data-tauri-drag-region>
       <img id="project-icon" hidden data-tauri-drag-region />
       <span id="project-name" data-tauri-drag-region></span>
-      <div class="panel-tabs" id="panel-tabs">
-        <button class="panel-btn" data-mode="commands" data-i18n-title="panel.tabCommandsTitle" data-i18n="panel.tabCommands">Befehle</button>
-        <span class="tab-sep"></span>
-        <button class="panel-btn" data-mode="draft" data-i18n-title="panel.tabDraftTitle" data-i18n="panel.tabDraft">Dokument</button>
-        <button class="panel-btn" data-mode="wiki" data-i18n-title="panel.tabWikiTitle" data-i18n="panel.tabWiki">Wiki</button>
-        <button class="panel-btn" data-mode="search" data-i18n-title="panel.tabSearchTitle" data-i18n="panel.tabSearch">Suche</button>
-        <span class="tab-sep"></span>
-      </div>
+      <span id="pool-sep">@</span>
       <span id="pool"></span>
+      <!-- Dateien wählen und als Pfade ins Prompt schreiben. -->
+      <button class="panel-btn" id="term-files" data-i18n-title="panel.pickFiles">
+        <svg width="14" height="14" viewBox="0 0 16 16"><path d="M13 7.5 8 12.5a3 3 0 0 1-4.2-4.2l5.5-5.5a2 2 0 0 1 2.8 2.8l-5.5 5.5a1 1 0 0 1-1.4-1.4l5-5" /></svg>
+      </button>
+      <!-- Tabs kommen aus der Modul-Registry (panel-wiring). -->
+      <div class="panel-tabs" id="panel-tabs"></div>
       <div id="winbtns">
         <button class="winbtn" id="win-min" data-i18n-aria="panel.minimize">
           <svg width="12" height="12" viewBox="0 0 12 12"><line x1="2" y1="6.5" x2="10" y2="6.5" /></svg>
@@ -69,10 +68,8 @@
             </button>
           </div>
         </div>
+        <!-- Modul-Container (<mode>-content) reihen sich hier ein. -->
         <div id="panel-content" class="md"></div>
-        <div id="commands-content" hidden></div>
-        <div id="search-content" hidden></div>
-        <div id="wiki-content" hidden></div>
       </aside>
     </div>
     <div id="resize-grips" aria-hidden="true">

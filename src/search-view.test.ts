@@ -21,7 +21,7 @@ const run = JSON.stringify({
   query: "arch",
   tag: null,
   home: "/tmp/archiv",
-  hits: [{ relpath: "a/2026-01-01_0000-x.md", title: "X", snippet: "ein **arch**iv" }],
+  hits: [{ id: "id-x", relpath: "a/2026-01-01_0000-x.md", title: "X", snippet: "ein **arch**iv" }],
 });
 
 describe("initSearchView", () => {
@@ -81,7 +81,11 @@ describe("initSearchView", () => {
     expect(tile.querySelector(".hit-title")!.textContent).toBe("X");
     expect(tile.querySelectorAll("mark").length).toBe(1);
     tile.click();
-    expect(onOpen).toHaveBeenCalledWith("/tmp/archiv/a/2026-01-01_0000-x.md");
+    expect(onOpen).toHaveBeenCalledWith(
+      "/tmp/archiv/a/2026-01-01_0000-x.md",
+      "a/2026-01-01_0000-x.md",
+      "id-x",
+    );
   });
 
   it("zeigt „Keine Treffer“ bei leerem Ergebnis", () => {

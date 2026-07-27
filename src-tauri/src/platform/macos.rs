@@ -84,7 +84,7 @@ pub(crate) fn reveal_path(path: &Path) {
 
 // ---------- Selbstinstallation ----------
 
-/// App-Bundle zum Programmpfad: …/ai-control.app/Contents/MacOS/ai-control.
+/// App-Bundle zum Programmpfad: …/ai-central.app/Contents/MacOS/ai-central.
 /// None, wenn das Binary nicht aus einem .app läuft (cargo run, CLI-Rollen).
 fn bundle_dir(exe: &Path) -> Option<&Path> {
   let dir = exe.parent()?.parent()?.parent()?;
@@ -121,14 +121,14 @@ pub(crate) fn offer_move_to_applications(paths: &Paths) {
   let deutsch = std::env::var("LANG").unwrap_or_default().starts_with("de");
   let (title, body, yes, no) = if deutsch {
     (
-      "aICentral installieren?",
+      "aiCentral installieren?",
       "Die App läuft noch nicht aus einem Programme-Ordner. Soll sie sich nach „Applications\" im Benutzerordner holen und von dort neu starten?",
       "Installieren",
       "Später",
     )
   } else {
     (
-      "Install aICentral?",
+      "Install aiCentral?",
       "The app is not running from an applications folder yet. Move it to \"Applications\" in your home folder and restart from there?",
       "Install",
       "Not now",
@@ -173,15 +173,15 @@ mod install_tests {
   use super::*;
 
   fn exe_in(dir: &str) -> PathBuf {
-    Path::new(dir).join("ai-control.app/Contents/MacOS/ai-control")
+    Path::new(dir).join("ai-central.app/Contents/MacOS/ai-central")
   }
 
   #[test]
   fn angebot_aus_dmg_und_downloads() {
     let home = Path::new("/Users/t");
-    let (bundle, target) = move_target(&exe_in("/Volumes/ai-control"), home).unwrap();
-    assert_eq!(bundle, Path::new("/Volumes/ai-control/ai-control.app"));
-    assert_eq!(target, Path::new("/Users/t/Applications/ai-control.app"));
+    let (bundle, target) = move_target(&exe_in("/Volumes/ai-central"), home).unwrap();
+    assert_eq!(bundle, Path::new("/Volumes/ai-central/ai-central.app"));
+    assert_eq!(target, Path::new("/Users/t/Applications/ai-central.app"));
     assert!(move_target(&exe_in("/Users/t/Downloads"), home).is_some());
   }
 
@@ -196,7 +196,7 @@ mod install_tests {
   /// Ohne .app-Bundle (cargo run, MCP-Rolle) kein Angebot.
   #[test]
   fn kein_angebot_ohne_bundle() {
-    assert!(move_target(Path::new("/w/target/release/ai-control"), Path::new("/Users/t")).is_none());
+    assert!(move_target(Path::new("/w/target/release/ai-central"), Path::new("/Users/t")).is_none());
   }
 }
 

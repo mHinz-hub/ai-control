@@ -4,7 +4,7 @@
 
 use std::process::Command;
 
-const UUID: &str = "ai-control-popup@local";
+const UUID: &str = "ai-central-popup@local";
 
 pub(super) fn enable_extension() {
   let Ok(out) = Command::new("gsettings")
@@ -17,8 +17,8 @@ pub(super) fn enable_extension() {
   if list.contains(UUID) {
     return;
   }
-  // GVariant-Liste erweitern: "['a']" → "['a', 'ai-control-popup@local']",
-  // leer ("[]" bzw. typannotiert "@as []") → "['ai-control-popup@local']".
+  // GVariant-Liste erweitern: "['a']" → "['a', 'ai-central-popup@local']",
+  // leer ("[]" bzw. typannotiert "@as []") → "['ai-central-popup@local']".
   let inner = list
     .trim()
     .trim_start_matches("@as")

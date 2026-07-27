@@ -18,12 +18,12 @@ fn install_panic_tracer() {
   std::panic::set_hook(Box::new(|info| {
     let bt = std::backtrace::Backtrace::force_capture();
     let dump = format!(
-      "\n========== ai-control PANIC (pid {}) ==========\n{info}\n\n{bt}\n========== END ==========\n",
+      "\n========== ai-central PANIC (pid {}) ==========\n{info}\n\n{bt}\n========== END ==========\n",
       std::process::id()
     );
     eprintln!("{dump}");
     let path =
-      std::env::temp_dir().join(format!("ai-control-panic-{}.log", std::process::id()));
+      std::env::temp_dir().join(format!("ai-central-panic-{}.log", std::process::id()));
     if std::fs::write(&path, &dump).is_ok() {
       eprintln!("Backtrace kopierbar in: {}", path.display());
     }
@@ -44,24 +44,6 @@ pub fn run() {
     return;
   }
 
-  // AppImage ist installationsfrei und kann die GNOME-Popup-Extension nicht
-  // ausrollen/aktivieren. Unter GNOME daher auf das deb-/rpm-Paket verweisen und
-  // beenden. KDE/XFCE zeigen das Tray ohne Extension — dort läuft die AppImage.
-  #[cfg(target_os = "linux")]
-  if std::env::var_os("APPIMAGE").is_some() && platform::is_gnome() {
-    rfd::MessageDialog::new()
-      .set_level(rfd::MessageLevel::Warning)
-      .set_title("aICentral")
-      .set_description(
-        "Die AppImage-Fassung wird unter GNOME nicht unterstützt: Das Tray-Icon \
-         braucht eine GNOME-Shell-Extension, die nur das deb-/rpm-Paket \
-         installiert. Bitte das deb- bzw. rpm-Paket verwenden.",
-      )
-      .set_buttons(rfd::MessageButtons::Ok)
-      .show();
-    std::process::exit(1);
-  }
-
   // Frisch aus dem DMG oder aus Downloads gestartet: einmal anbieten, sich
   // nach ~/Applications zu holen. Nur die Haupt-App fragt — Terminal-Prozesse
   // starten aus demselben Bundle, das dann längst am Ziel liegt.
@@ -78,7 +60,7 @@ pub fn run() {
       let project = args.next().expect("--terminal braucht einen Projektnamen");
       // Eigene Wayland-app_id pro Terminal-Prozess -> eigener Dock-Eintrag
       // (muss vor dem GTK-Init stehen; No-op außerhalb Linux).
-      platform::set_app_id(&format!("aicontrol-{project}"));
+      platform::set_app_id(&format!("aicentral-{project}"));
       let icon = domain::project::project_config(&project)
         .expect("Projekt-Config nicht lesbar")
         .terminal
@@ -94,19 +76,37 @@ pub fn run() {
         .expect("error while building tauri application")
         // Das Dock-Icon erst nach dem App-Start setzen: in setup() gesetzt
         // überschreibt macOS es beim Anlegen des Dock-Tiles wieder.
-        .run(move |app, event| {
-          if let tauri::RunEvent::Ready = event {
+        .run(move |app, event| match event {
+          tauri::RunEvent::Ready => {
             if let Some(icon) = icon.as_deref() {
               platform::set_dock_icon(icon);
             }
             platform::activate_self(app);
           }
+          // Klick aufs Dock-Icon: das Terminal-Fenster nach vorn. macOS
+          // unternimmt von sich aus nichts, solange irgendein Fenster des
+          // Prozesses sichtbar ist — mit offenem Commit- oder Archiv-Fenster
+          // bliebe der Klick also wirkungslos.
+          // `Reopen` gibt es nur auf macOS/iOS, daher der cfg-Gate.
+          #[cfg(any(target_os = "macos", target_os = "ios"))]
+          tauri::RunEvent::Reopen { .. } => {
+            use tauri::Manager;
+            platform::activate_self(app);
+            for (label, w) in app.webview_windows() {
+              if label.starts_with("term-") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+              }
+            }
+          }
+          _ => {}
         });
     }
     _ => {
       // Feste Wayland-app_id fürs Hauptfenster (vor GTK-Init) — GNOME ordnet
-      // dem offenen Fenster über ai-control.desktop das App-Icon zu.
-      platform::set_app_id("ai-control");
+      // dem offenen Fenster über ai-central.desktop das App-Icon zu.
+      platform::set_app_id("ai-central");
       app::main_builder()
         .run(context)
         .expect("error while running tauri application");
