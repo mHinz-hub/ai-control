@@ -52,7 +52,7 @@ impl Paths {
 
   /// Panel-Dateien pro Projekt: der Skill schreibt seinen Entwurf hier hinein,
   /// der Terminal-Prozess beobachtet die Datei und zeigt sie im Panel.
-  fn panels_dir(&self) -> PathBuf {
+  pub(crate) fn panels_dir(&self) -> PathBuf {
     self.config_dir().join("panels")
   }
 }
@@ -121,8 +121,31 @@ pub(crate) fn commit_file(project: &str) -> PathBuf {
 /// Persistente ToDo-Liste eines Projekts (JSONL, anhängend — überlebt
 /// Sessions; write_todos hängt an, Kachel-Löschen entfernt Zeilen). Der Pfad
 /// landet als AI_CENTRAL_TODOS in der PTY-Umgebung.
+///
+/// Liegt im Projekt neben der Config und reist damit über git mit — anders als
+/// die flüchtigen Panel-Kanäle, die maschinenlokal unter panels/ bleiben.
+///
+/// Ohne Registry-Eintrag gibt es keinen Projektordner; das ist derselbe
+/// Programmierfehler wie ein Projektname mit Pfadanteilen und scheitert wie
+/// dieser laut — die Aufrufer bekommen ihre ID aus Registry oder PTY-Umgebung.
 pub(crate) fn todos_file(project: &str) -> PathBuf {
-  Paths::real()
+  todos_file_in(&Paths::real(), project)
+}
+
+pub(crate) fn todos_file_in(paths: &Paths, project: &str) -> PathBuf {
+  crate::domain::registry::project_dir(paths, checked(project))
+    .expect("ToDo-Liste eines nicht registrierten Projekts")
+    .join(crate::domain::project::PROJECT_CONFIG_DIR)
+    .join(TODOS_FILE)
+}
+
+/// Dateiname der ToDo-Liste im Projekt-Punktordner.
+pub(crate) const TODOS_FILE: &str = "todos.jsonl";
+
+/// Alter Ablageort der ToDo-Liste (maschinenlokal unter panels/), aus dem der
+/// Session-Start einmalig ins Projekt umzieht.
+pub(crate) fn legacy_todos_file(paths: &Paths, project: &str) -> PathBuf {
+  paths
     .panels_dir()
     .join(format!("{}.todos.jsonl", checked(project)))
 }

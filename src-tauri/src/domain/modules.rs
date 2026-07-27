@@ -22,9 +22,13 @@ pub(crate) struct BufferDesc {
   pub(crate) event: &'static str,
   /// Pufferdatei des Projekts.
   pub(crate) file: fn(&str) -> std::path::PathBuf,
-  /// Dateiname-Suffix (`<projekt>.<suffix>`) — muss zu `file` passen
-  /// (Test buffer_datei_passt_zum_suffix); Grundlage der Löschvorschau.
+  /// Dateiname-Suffix (`<projekt>.<suffix>`) der maschinenlokalen Kanäle unter
+  /// panels/ — muss zu `file` passen (Test buffer_datei_passt_zum_suffix);
+  /// Grundlage der Löschvorschau. Leer bei Puffern, die im Projekt liegen.
   pub(crate) suffix: &'static str,
+  /// Puffer liegt im Projekt (`.ai-central/`) statt unter panels/: er reist
+  /// mit dem Repo und stirbt mit dem Punktordner, nicht als Panel-Kanal.
+  pub(crate) in_project: bool,
   /// Persistente Puffer überleben Sessions — der Session-Start legt sie nur
   /// an, statt sie zu leeren.
   pub(crate) persistent: bool,
@@ -58,6 +62,7 @@ pub(crate) const MODULES: &[ModuleDesc] = &[
       event: "panel-update",
       file: crate::domain::paths::panel_file,
       suffix: "md",
+      in_project: false,
       persistent: false,
     }],
   },
@@ -73,6 +78,7 @@ pub(crate) const MODULES: &[ModuleDesc] = &[
       event: "commands-update",
       file: crate::domain::paths::commands_file,
       suffix: "commands.jsonl",
+      in_project: false,
       persistent: false,
     }],
   },
@@ -89,6 +95,7 @@ pub(crate) const MODULES: &[ModuleDesc] = &[
       event: "todos-update",
       file: crate::domain::paths::todos_file,
       suffix: "todos.jsonl",
+      in_project: true,
       persistent: true,
     }],
   },
@@ -108,6 +115,7 @@ pub(crate) const MODULES: &[ModuleDesc] = &[
       event: "commit-open",
       file: crate::domain::paths::commit_file,
       suffix: "commit",
+      in_project: false,
       persistent: false,
     }],
   },
@@ -124,6 +132,7 @@ pub(crate) const MODULES: &[ModuleDesc] = &[
         event: "search-update",
         file: crate::domain::paths::search_file,
         suffix: "search.json",
+        in_project: false,
         persistent: false,
       },
       BufferDesc {
@@ -132,6 +141,7 @@ pub(crate) const MODULES: &[ModuleDesc] = &[
         event: "wiki-update",
         file: crate::domain::paths::wiki_file,
         suffix: "wiki.json",
+        in_project: false,
         persistent: false,
       },
     ],
@@ -270,10 +280,27 @@ mod tests {
 
   #[test]
   fn buffer_datei_passt_zum_suffix() {
-    for b in MODULES.iter().flat_map(|m| m.buffers) {
+    for b in MODULES.iter().flat_map(|m| m.buffers).filter(|b| !b.in_project) {
       let name = (b.file)("proj");
       let name = name.file_name().unwrap().to_str().unwrap();
       assert_eq!(name, format!("proj.{}", b.suffix));
+    }
+  }
+
+  /// Puffer im Projekt liegen im Punktordner neben der Config — nicht unter
+  /// panels/, sonst reisten sie nicht mit dem Repo.
+  #[test]
+  fn projekt_puffer_liegt_im_punktordner() {
+    let p = tmp_paths();
+    create_project(&p, "proj").unwrap();
+    for b in MODULES.iter().flat_map(|m| m.buffers).filter(|b| b.in_project) {
+      let f = crate::domain::paths::todos_file_in(&p, "proj");
+      assert_eq!(f.file_name().unwrap(), crate::domain::paths::TODOS_FILE);
+      assert_eq!(
+        f.parent().unwrap().file_name().unwrap(),
+        crate::domain::project::PROJECT_CONFIG_DIR
+      );
+      assert!(!f.starts_with(p.panels_dir()), "{} liegt unter panels/", b.id);
     }
   }
 

@@ -428,7 +428,7 @@ async function createProject() {
 interface DeletePreview {
   name: string;
   projectDir: string;
-  aiControlDir: boolean;
+  aiCentralDir: boolean;
   archivePermission: boolean;
   panelFiles: number;
   archiveHome: string | null;
@@ -760,7 +760,7 @@ onUnmounted(() => {
       <p class="hint">{{ $t("projects.deletePreviewTitle") }}</p>
       <ul class="affected">
         <li>{{ $t("projects.artRegistry") }}</li>
-        <li v-if="pendingDelete.preview.aiControlDir">{{ $t("projects.artAiControl") }}</li>
+        <li v-if="pendingDelete.preview.aiCentralDir">{{ $t("projects.artAiCentral") }}</li>
         <li v-if="pendingDelete.preview.archivePermission">{{ $t("projects.artArchivePerm") }}</li>
         <li v-if="pendingDelete.preview.panelFiles">
           {{ $t("projects.artPanelFiles", pendingDelete.preview.panelFiles) }}

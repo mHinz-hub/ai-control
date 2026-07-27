@@ -537,8 +537,33 @@ fn session_files(paths: &Paths, project: &str) -> Vec<PathBuf> {
   crate::domain::modules::MODULES
     .iter()
     .flat_map(|m| m.buffers)
+    // Puffer im Projekt sind keine Panel-Kanäle: sie liegen im Punktordner
+    // und fallen mit ihm, statt einzeln gelöscht zu werden.
+    .filter(|b| !b.in_project)
     .map(|b| panels.join(format!("{project}.{}", b.suffix)))
     .collect()
+}
+
+/// Holt eine ToDo-Liste vom alten Ablageort (maschinenlokal unter panels/) in
+/// den Projekt-Punktordner. Bis 0.4.0 lag sie neben den flüchtigen Kanälen und
+/// fehlte damit auf jedem anderen Rechner; ab jetzt reist sie mit dem Repo.
+///
+/// Läuft beim Session-Start, einmal je Projekt: liegt am Ziel schon eine
+/// Liste, bleibt sie — die alte ist dann der ältere Stand und wird nicht
+/// darübergeschrieben.
+pub(crate) fn migrate_todos_into_project(paths: &Paths, project: &str) -> Result<(), String> {
+  let alt = crate::domain::paths::legacy_todos_file(paths, project);
+  if !alt.is_file() {
+    return Ok(());
+  }
+  let neu = crate::domain::paths::todos_file_in(paths, project);
+  if neu.is_file() {
+    return Ok(());
+  }
+  if let Some(parent) = neu.parent() {
+    fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+  }
+  fs::rename(&alt, &neu).map_err(|e| format!("{} -> {}: {e}", alt.display(), neu.display()))
 }
 
 /// Löscht ein Projekt in drei Stufen (Eskalationsleiter, jede schließt die
@@ -1361,6 +1386,28 @@ mod tests {
     assert!(err.contains("2 MB"));
     // Geräte-Datei liegt eh außerhalb der Wurzeln — der Ablehnungsgrund davor
     assert!(read_for_panel_in(&p, "proj", "/dev/zero").is_err());
+  }
+
+  /// Alte ToDo-Liste unter panels/ zieht beim Session-Start ins Projekt; ein
+  /// dort schon vorhandener (neuerer) Stand bleibt unangetastet.
+  #[test]
+  fn todos_ziehen_ins_projekt() {
+    let p = tmp_paths();
+    create_project(&p, "proj").unwrap();
+    let alt = crate::domain::paths::legacy_todos_file(&p, "proj");
+    fs::create_dir_all(alt.parent().unwrap()).unwrap();
+    fs::write(&alt, "{\"text\":\"alt\"}\n").unwrap();
+
+    migrate_todos_into_project(&p, "proj").unwrap();
+
+    let neu = crate::domain::paths::todos_file_in(&p, "proj");
+    assert!(!alt.exists(), "alte Liste bleibt liegen");
+    assert_eq!(fs::read_to_string(&neu).unwrap(), "{\"text\":\"alt\"}\n");
+
+    // Zweiter Lauf mit erneut aufgetauchter Altdatei: das Projekt gewinnt.
+    fs::write(&alt, "{\"text\":\"ueberholt\"}\n").unwrap();
+    migrate_todos_into_project(&p, "proj").unwrap();
+    assert_eq!(fs::read_to_string(&neu).unwrap(), "{\"text\":\"alt\"}\n");
   }
 
   /// Stufe „nur Integration": ai-central-Spuren weg, Ordner und

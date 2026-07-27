@@ -72,7 +72,9 @@ export function initCommandsView(
         all.className = "cmd-all";
         all.textContent = t("commands.copyAll");
         all.addEventListener("click", async () => {
-          await writeText(cmds.map((c) => stripInvisibles(c.cmd)).join("\n"));
+          // Leerzeile zwischen den Befehlen: mehrzeilige Kommandos (Heredoc,
+          // fortgesetzte Zeilen) sind sonst nicht vom nächsten zu trennen.
+          await writeText(cmds.map((c) => stripInvisibles(c.cmd)).join("\n\n"));
           flash(all, "copied");
         });
         head.append(all);

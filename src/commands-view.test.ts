@@ -1,5 +1,14 @@
 // Modus-Logik (Tabs) und Kachel-Ansicht der Befehls-History.
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const kopiert: string[] = [];
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
+  writeText: (s: string) => {
+    kopiert.push(s);
+    return Promise.resolve();
+  },
+}));
+
 import { initCommandsView, initPanelMode } from "./commands-view";
 
 function modeSetup() {
@@ -94,6 +103,17 @@ describe("initCommandsView", () => {
     expect(document.querySelector(".cmd-text")!.textContent).toBe("ls -la");
     view.set("");
     expect(view.empty()).toBe(true);
+  });
+
+  /// „Alle kopieren" trennt die Befehle durch eine Leerzeile — sonst hängt
+  /// die letzte Zeile eines mehrzeiligen Kommandos am nächsten Befehl.
+  it("kopiert alle Befehle mit Leerzeile dazwischen", async () => {
+    kopiert.length = 0;
+    const view = initCommandsView(document.getElementById("c")!, () => {});
+    view.set(jsonl);
+    document.querySelector<HTMLElement>(".cmd-all")!.click();
+    await Promise.resolve();
+    expect(kopiert).toEqual(["ls -la\n\npwd"]);
   });
 
   /// Gelöscht wird über die stabile ID aus write_commands — keine Indizes,

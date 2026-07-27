@@ -143,6 +143,7 @@ pub fn term_start(
       .flat_map(|m| m.buffers)
       .map(|b| (b, (b.file)(&project)))
       .collect();
+  crate::domain::project::migrate_todos_into_project(&Paths::real(), &project)?;
   for (b, path) in &buffers {
     if let Some(parent) = path.parent() {
       let _ = std::fs::create_dir_all(parent);
