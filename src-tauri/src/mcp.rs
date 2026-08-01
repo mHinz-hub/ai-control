@@ -606,6 +606,20 @@ fn call_show_archive(req: &Value) -> Value {
     Err(e) => return err(e),
   };
   let tag = req["params"]["arguments"]["tag"].as_str();
+  // Erst die Invarianten des Notizmodells herstellen — sonst zeigt die
+  // Übersicht Ordner ohne Knotentext und Dokumente ohne ID, und ein Klick
+  // darauf öffnet nichts oder das Falsche.
+  let display =
+    match crate::domain::project::display_name_in(&crate::domain::paths::Paths::real(), &project) {
+      Ok(d) => d,
+      Err(e) => return err(e),
+    };
+  if let Err(e) = crate::domain::archive_ops::ensure_node_texts(&home, &display) {
+    return err(e);
+  }
+  if let Err(e) = crate::domain::archive_ops::ensure_ids(&home) {
+    return err(e);
+  }
   let page = match crate::domain::archive_index::archive_page(&home, tag) {
     Ok(page) => page,
     Err(e) => return err(e),

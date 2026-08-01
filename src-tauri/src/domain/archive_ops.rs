@@ -54,6 +54,20 @@ fn is_html(path: &Path) -> bool {
   path.extension().is_some_and(|e| e == "html")
 }
 
+/// Ressourcen-Ordner einer Notiz: der versteckte Nachbar `.<stem>.res`.
+/// Dort liegt, was zur Notiz gehört und nicht für sich steht (Diagramme).
+/// Versteckt, weil der Archiv-Scan Punkt-Einträge überspringt — die
+/// Ressourcen tauchen damit weder in der Dateiübersicht noch in der Suche
+/// auf und sind beim Aufräumen nicht der lose Nachbar, den man wegwirft.
+pub(crate) fn res_dir(relpath: &str) -> String {
+  let p = Path::new(relpath);
+  let stem = p.file_stem().unwrap_or_default().to_string_lossy();
+  match p.parent().map(|d| d.to_string_lossy().to_string()).unwrap_or_default() {
+    d if d.is_empty() => format!(".{stem}.res"),
+    d => format!("{d}/.{stem}.res"),
+  }
+}
+
 /// Ziel für rename: darf noch nicht existieren — stilles Überschreiben wäre
 /// Datenverlust.
 fn fresh_target(target: &Path, home: &Path) -> Result<(), String> {
@@ -79,12 +93,49 @@ pub(crate) fn rename_doc(home: &Path, relpath: &str, name: &str) -> Result<Strin
   }
   fresh_target(&target, home)?;
   fs::rename(&src, &target).map_err(|e| format!("{}: {e}", src.display()))?;
-  Ok(target.strip_prefix(home).unwrap().display().to_string())
+  let neu = target.strip_prefix(home).unwrap().display().to_string();
+  rename_res(home, relpath, &neu, &target)?;
+  Ok(neu)
+}
+
+/// Der Ressourcen-Ordner trägt den Dokumentnamen, also wandert er beim
+/// Umbenennen mit — und die Verweise im Text zeigen danach wieder auf ihn.
+fn rename_res(home: &Path, alt: &str, neu: &str, doc: &Path) -> Result<(), String> {
+  let (alt_dir, neu_dir) = (res_dir(alt), res_dir(neu));
+  if !home.join(&alt_dir).is_dir() {
+    return Ok(());
+  }
+  fs::rename(home.join(&alt_dir), home.join(&neu_dir))
+    .map_err(|e| format!("{alt_dir}: {e}"))?;
+  let name = |d: &str| format!("{}/", d.rsplit('/').next().unwrap_or(d).to_string());
+  let text = fs::read_to_string(doc).map_err(|e| format!("{}: {e}", doc.display()))?;
+  let ersetzt = text.replace(&name(&alt_dir), &name(&neu_dir));
+  if ersetzt != text {
+    fs::write(doc, ersetzt).map_err(|e| format!("{}: {e}", doc.display()))?;
+  }
+  Ok(())
 }
 
 pub(crate) fn delete_doc(home: &Path, relpath: &str) -> Result<(), String> {
   let path = file_path(home, relpath)?;
-  fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))
+  fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+  // Die Ressourcen gehören zur Notiz — ohne sie bleiben sie als versteckter
+  // Ordner ohne Bezug liegen.
+  let res = home.join(res_dir(relpath));
+  if res.is_dir() {
+    fs::remove_dir_all(&res).map_err(|e| format!("{}: {e}", res.display()))?;
+  }
+  Ok(())
+}
+
+/// Löscht einen Ordner unterhalb des Archiv-Home samt Inhalt.
+pub(crate) fn delete_folder(home: &Path, folder: &str) -> Result<(), String> {
+  checked_rel(folder)?;
+  if folder.is_empty() {
+    return Err("Wurzel kann nicht gelöscht werden".into());
+  }
+  let dir = home.join(folder);
+  fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))
 }
 
 /// Legt einen (auch leeren) Ordner unterhalb des Archiv-Home an.
@@ -127,6 +178,60 @@ pub(crate) fn create_doc(
   std::io::Write::write_all(&mut file, fm.as_bytes())
     .map_err(|e| format!("{}: {e}", target.display()))?;
   Ok(target.strip_prefix(home).unwrap().display().to_string())
+}
+
+/// Endungen und Startinhalte der Textdateien, die das Archiv selbst anlegt.
+/// Ein leeres JSON oder XML wäre beim ersten Öffnen ungültig — der Rumpf
+/// spart den Handgriff.
+fn text_vorlage(art: &str) -> Result<(&'static str, &'static str), String> {
+  Ok(match art {
+    "text" => ("txt", ""),
+    "json" => ("json", "{\n}\n"),
+    "yaml" => ("yaml", "---\n"),
+    "xml" => ("xml", "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<root>\n</root>\n"),
+    _ => return Err(format!("unbekannte Textart: {art}")),
+  })
+}
+
+/// Legt eine Textdatei an (`text`, `json`, `yaml`, `xml`) — Rohdaten neben
+/// den Notizen, lesbar im Datei-Viewer und im Editor. Liefert den relpath.
+pub(crate) fn create_text(
+  home: &Path,
+  folder: &str,
+  name: &str,
+  art: &str,
+) -> Result<String, String> {
+  let name = name.trim();
+  if name.is_empty() {
+    return Err("Dateiname fehlt".into());
+  }
+  if !folder.is_empty() {
+    checked_rel(folder)?;
+  }
+  let (ext, inhalt) = text_vorlage(art)?;
+  let dir = home.join(folder);
+  fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+  let target = dir.join(format!("{}.{ext}", slugify(name)));
+  let mut file = match fs::OpenOptions::new().write(true).create_new(true).open(&target) {
+    Ok(f) => f,
+    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+      return Err(format!(
+        "Ziel existiert bereits: {}",
+        target.strip_prefix(home).unwrap_or(&target).display()
+      ))
+    }
+    Err(e) => return Err(format!("{}: {e}", target.display())),
+  };
+  std::io::Write::write_all(&mut file, inhalt.as_bytes())
+    .map_err(|e| format!("{}: {e}", target.display()))?;
+  Ok(target.strip_prefix(home).unwrap().display().to_string())
+}
+
+/// Schreibt eine Textdatei des Archivs (kein Frontmatter, kein Rumpf — der
+/// Inhalt ist die Datei).
+pub(crate) fn write_text(home: &Path, relpath: &str, text: &str) -> Result<(), String> {
+  let path = file_path(home, relpath)?;
+  fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Legt eine leere HTML-Notiz an: `<slug>.html` im Ordner (leer = Wurzel).
@@ -208,8 +313,8 @@ pub(crate) fn write_body(path: &Path, text: &str) -> Result<(), String> {
 }
 
 /// Verschiebt bzw. benennt einen ganzen Ordner um (fs::rename des
-/// Verzeichnisses); Eltern des Ziels entstehen bei Bedarf. Die Textdatei des
-/// Knotens (gleichnamiges Dokument daneben) wandert mit.
+/// Verzeichnisses); Eltern des Ziels entstehen bei Bedarf. Der Knotentext
+/// (`index.md` im Ordner) wandert damit von selbst mit.
 pub(crate) fn move_folder(home: &Path, folder: &str, to: &str) -> Result<(), String> {
   checked_rel(folder)?;
   checked_rel(to)?;
@@ -225,14 +330,7 @@ pub(crate) fn move_folder(home: &Path, folder: &str, to: &str) -> Result<(), Str
   if let Some(parent) = target.parent() {
     fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
   }
-  fs::rename(&src, &target).map_err(|e| format!("{}: {e}", src.display()))?;
-  let src_text = src.with_extension("md");
-  if src_text.is_file() {
-    let target_text = target.with_extension("md");
-    fresh_target(&target_text, home)?;
-    fs::rename(&src_text, &target_text).map_err(|e| format!("{}: {e}", src_text.display()))?;
-  }
-  Ok(())
+  fs::rename(&src, &target).map_err(|e| format!("{}: {e}", src.display()))
 }
 
 /// Zweite Invariante des Notizmodells: JEDES Dokument trägt eine technische
@@ -305,21 +403,46 @@ pub(crate) fn ensure_node_texts(
 }
 
 fn ensure_dir_texts(dir: &Path, project_name: &str) -> Result<(), String> {
-  let stems = md_stems(dir)?;
   for entry in fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
     let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
     let name = entry.file_name().to_string_lossy().to_string();
     if name.starts_with('.') || !entry.path().is_dir() {
       continue;
     }
-    // Auch gestempelte Dokumente zählen als Knotentext (Name = Stem ohne
-    // Stempel) — kein Duplikat anlegen.
-    if !stems.contains(name.as_str()) {
-      write_node_text(&dir.join(format!("{name}.md")), &name, project_name)?;
+    let sub = entry.path();
+    // Der Knotentext liegt IM Ordner (`<ordner>/index.md`) — Löschen des
+    // Ordners räumt ihn damit mit weg. Eine Notiz der alten Konvention
+    // (gleichnamig NEBEN dem Ordner) wandert einmalig hinein.
+    if !md_stems(&sub)?.contains("index") {
+      match twin_file(dir, &name)? {
+        Some(alt) => {
+          let ext = alt.extension().unwrap_or_default().to_string_lossy().to_string();
+          let ziel = sub.join(format!("index.{ext}"));
+          fs::rename(&alt, &ziel).map_err(|e| format!("{}: {e}", alt.display()))?;
+        }
+        None => write_node_text(&sub.join("index.md"), &name, project_name)?,
+      }
     }
-    ensure_dir_texts(&entry.path(), project_name)?;
+    ensure_dir_texts(&sub, project_name)?;
   }
   Ok(())
+}
+
+/// Notiz der alten Zwillings-Konvention: direkt neben dem Ordner, Stem (ohne
+/// Zeitstempel) gleich dem Ordnernamen.
+fn twin_file(dir: &Path, name: &str) -> Result<Option<std::path::PathBuf>, String> {
+  for entry in fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
+    let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
+    let fname = entry.file_name().to_string_lossy().to_string();
+    for ext in [".md", ".html"] {
+      if let Some(stem) = fname.strip_suffix(ext) {
+        if strip_stamp(stem) == name {
+          return Ok(Some(entry.path()));
+        }
+      }
+    }
+  }
+  Ok(None)
 }
 
 /// Namen (Stem ohne Zeitstempel) aller Notiz-Dateien direkt im Ordner.
@@ -377,6 +500,38 @@ mod tests {
     // Ohne Stempel bleibt der Name pur.
     fs::write(home.join("plain.md"), "c").unwrap();
     assert_eq!(rename_doc(&home, "plain.md", "Neu").unwrap(), "neu.md");
+  }
+
+  /// Der Ressourcen-Ordner hängt am Dokumentnamen: Umbenennen zieht ihn mit
+  /// und schreibt die Verweise im Text nach, Löschen räumt ihn weg.
+  #[test]
+  fn ressourcen_ordner_folgt_der_notiz() {
+    let home = archiv();
+    assert_eq!(res_dir("konzepte/plan.md"), "konzepte/.plan.res");
+    assert_eq!(res_dir("plan.md"), ".plan.res");
+
+    fs::create_dir_all(home.join("konzepte/.2026-07-19_1005-notiz-deploy.res")).unwrap();
+    fs::write(
+      home.join("konzepte/.2026-07-19_1005-notiz-deploy.res/skizze.drawio"),
+      "<mxfile/>",
+    )
+    .unwrap();
+    fs::write(
+      home.join("konzepte/2026-07-19_1005-notiz-deploy.md"),
+      "Text\n\n![](./.2026-07-19_1005-notiz-deploy.res/skizze.drawio)\n",
+    )
+    .unwrap();
+
+    let rel =
+      rename_doc(&home, "konzepte/2026-07-19_1005-notiz-deploy.md", "Deploy Nötiz!").unwrap();
+    let res = home.join("konzepte/.2026-07-19_1005-deploy-noetiz.res");
+    assert!(res.join("skizze.drawio").is_file());
+    assert!(!home.join("konzepte/.2026-07-19_1005-notiz-deploy.res").exists());
+    let text = fs::read_to_string(home.join(&rel)).unwrap();
+    assert!(text.contains("![](./.2026-07-19_1005-deploy-noetiz.res/skizze.drawio)"), "{text}");
+
+    delete_doc(&home, &rel).unwrap();
+    assert!(!res.exists());
   }
 
   #[test]
@@ -451,28 +606,38 @@ mod tests {
     let home = archiv();
     fs::create_dir_all(home.join("leer/unter")).unwrap();
     ensure_node_texts(&home, "proj").unwrap();
-    // Wurzel und alle Ordner haben danach ihre Textdatei.
+    // Wurzel und alle Ordner haben ihre index-Notiz IM Ordner.
     assert!(home.join("index.md").is_file());
-    assert!(home.join("leer.md").is_file());
-    assert!(home.join("leer/unter.md").is_file());
-    let text = fs::read_to_string(home.join("leer.md")).unwrap();
+    assert!(home.join("leer/index.md").is_file());
+    assert!(home.join("leer/unter/index.md").is_file());
+    assert!(home.join("konzepte/index.md").is_file());
+    let text = fs::read_to_string(home.join("leer/index.md")).unwrap();
     assert!(text.contains("\ntitle: \"leer\"\n"));
-    // Gestempelte Zwillinge zählen als Knotentext — kein Duplikat: konzepte/
-    // hat keins, bekommt eines; ein zweiter Lauf legt nichts Neues an.
-    assert!(home.join("konzepte.md").is_file());
-    let before = fs::read_to_string(home.join("konzepte.md")).unwrap();
+    // Ein zweiter Lauf legt nichts Neues an.
+    let before = fs::read_to_string(home.join("konzepte/index.md")).unwrap();
     ensure_node_texts(&home, "proj").unwrap();
-    assert_eq!(fs::read_to_string(home.join("konzepte.md")).unwrap(), before);
+    assert_eq!(fs::read_to_string(home.join("konzepte/index.md")).unwrap(), before);
   }
 
   #[test]
-  fn ordner_verschieben_nimmt_knotentext_mit() {
+  fn alte_zwillingsnotiz_wandert_als_index_hinein() {
     let home = archiv();
-    fs::write(home.join("konzepte.md"), "k").unwrap();
+    fs::write(home.join("konzepte.md"), "altbestand").unwrap();
+    ensure_node_texts(&home, "proj").unwrap();
+    assert!(!home.join("konzepte.md").exists());
+    assert_eq!(
+      fs::read_to_string(home.join("konzepte/index.md")).unwrap(),
+      "altbestand"
+    );
+  }
+
+  #[test]
+  fn ordner_verschieben_nimmt_index_mit() {
+    let home = archiv();
+    fs::write(home.join("konzepte/index.md"), "k").unwrap();
     move_folder(&home, "konzepte", "notizen").unwrap();
     assert!(home.join("notizen").is_dir());
-    assert_eq!(fs::read_to_string(home.join("notizen.md")).unwrap(), "k");
-    assert!(!home.join("konzepte.md").exists());
+    assert_eq!(fs::read_to_string(home.join("notizen/index.md")).unwrap(), "k");
   }
 
   #[test]

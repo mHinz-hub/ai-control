@@ -38,6 +38,11 @@ pub(crate) struct Project {
   pub(crate) pool: Option<String>,
   pub(crate) running: bool,
   pub(crate) terminal: TerminalConfig,
+  /// Warum die Config dieses Projekts nicht lesbar ist (kaputtes JSON,
+  /// stehengebliebene Merge-Marker, fehlende Rechte). Das Projekt bleibt in
+  /// der Liste und trägt seinen Fehler sichtbar — die übrigen laufen weiter.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub(crate) error: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -168,13 +173,21 @@ pub(crate) fn projects_using_pool(paths: &Paths, pool: &str) -> Result<Vec<Strin
 pub(crate) fn list_projects_in(paths: &Paths) -> Result<Vec<Project>, String> {
   let mut projects = Vec::new();
   for (id, entry) in load_registry(paths)? {
-    let cfg = read_project_config_in(paths, &id)?;
+    // Ein Projekt mit kaputter Config verschwindet nicht und nimmt auch nicht
+    // die übrigen mit: Es steht mit seiner ID in der Liste und trägt den
+    // Fehler. Sichtbar bleiben muss es, damit der Ordner überhaupt auffindbar
+    // ist — nur von dort lässt sich der Schaden beheben.
+    let (cfg, error) = match read_project_config_in(paths, &id) {
+      Ok(cfg) => (cfg, None),
+      Err(e) => (ProjectConfig::default(), Some(e)),
+    };
     projects.push(Project {
       running: is_running(&id),
       path: contract_home(paths, &entry.dir),
       pool: entry.pool,
       name: cfg.name.unwrap_or_else(|| id.clone()),
       terminal: cfg.terminal,
+      error,
       id,
     });
   }
@@ -786,7 +799,19 @@ pub(crate) fn migrate_layout_in(paths: &Paths) -> Result<(), String> {
     // war der Anzeigename.
     let cfg_dir = entry.dir.join(PROJECT_CONFIG_DIR);
     let cfg_path = cfg_dir.join(PROJECT_FILE);
-    let mut cfg = read_config_at(&entry.dir)?;
+    // Der Zustand eines einzelnen Projektordners darf den Start nicht
+    // aufhalten: Die Migration läuft im Tauri-setup, ein Fehler hier ließe die
+    // App ohne Fenster und ohne Meldung enden. Ein Projekt mit unlesbarer
+    // Config bleibt unverändert in der Registry und wird übersprungen; sichtbar
+    // wird es in der Projektliste (list_projects_in).
+    let mut cfg = match read_config_at(&entry.dir) {
+      Ok(cfg) => cfg,
+      Err(e) => {
+        log::warn!("Projekt {key} übersprungen: {e}");
+        new_reg.insert(key, entry);
+        continue;
+      }
+    };
     let mut cfg_dirty = cfg.id.is_none() || cfg.name.is_none();
     let id = cfg.id.get_or_insert_with(|| uuid::Uuid::new_v4().to_string()).clone();
     cfg.name.get_or_insert_with(|| key.clone());
@@ -841,6 +866,44 @@ mod tests {
 
     let err = project_pool_dir_in(&p, "fremd").unwrap_err();
     assert!(err.contains("ungültiger Pool"));
+  }
+
+  /// Ein Projekt mit kaputter Config (stehengebliebene Merge-Marker) darf
+  /// weder die Migration noch die Projektliste kippen. Die Migration läuft im
+  /// Tauri-setup: ein Fehler dort beendet die App, bevor ein Fenster da ist —
+  /// ohne jede Meldung, weil es noch keine Oberfläche gibt.
+  #[test]
+  fn kaputte_projekt_config_haelt_start_und_liste_nicht_auf() {
+    let p = tmp_paths();
+    create_project(&p, "heil").unwrap();
+    create_project(&p, "kaputt").unwrap();
+    let cfg = p
+      .projects_dir()
+      .join("kaputt")
+      .join(PROJECT_CONFIG_DIR)
+      .join(PROJECT_FILE);
+    fs::write(
+      &cfg,
+      "<<<<<<< HEAD\n{\"id\": \"kaputt\", \"name\": \"A\"}\n=======\n{\"id\": \"kaputt\", \"name\": \"B\"}\n>>>>>>> other\n",
+    )
+    .unwrap();
+
+    // Die Migration läuft durch und lässt das kaputte Projekt in Ruhe.
+    migrate_layout_in(&p).unwrap();
+    assert_eq!(
+      fs::read_to_string(&cfg).unwrap().lines().next().unwrap(),
+      "<<<<<<< HEAD"
+    );
+
+    // Beide Projekte stehen in der Liste; das kaputte trägt seinen Fehler und
+    // die ID als Namen.
+    let liste = list_projects_in(&p).unwrap();
+    assert_eq!(liste.len(), 2);
+    let heil = liste.iter().find(|x| x.id == "heil").unwrap();
+    assert!(heil.error.is_none());
+    let kaputt = liste.iter().find(|x| x.id == "kaputt").unwrap();
+    assert_eq!(kaputt.name, "kaputt");
+    assert!(kaputt.error.as_ref().unwrap().contains("config.json"));
   }
 
   /// Ohne zugewiesenen Pool gibt es kein CLAUDE_CONFIG_DIR und damit auch

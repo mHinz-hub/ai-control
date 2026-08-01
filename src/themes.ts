@@ -2,6 +2,24 @@
 /// genutzt vom Terminal-Fenster (Header, angedocktes Panel) und vom
 /// abgelösten Panel-Fenster (panel.ts), damit beide gleich aussehen.
 
+/// Abstufungen zwischen Fläche und Text: Linien, gedämpfter Text, blasser
+/// Text. Alle drei werden gemischt, nicht aus dem Terminal-Theme entnommen.
+///
+/// Die Terminalfarben taugen dafür nicht: `black` liegt in Dracula und Nord
+/// exakt auf der Flächenfarbe (Ränder unsichtbar), `brightWhite` in den
+/// hellen Themes fast darauf (Kontrast 1,1 — Text nicht lesbar), und
+/// `brightBlack` in Nord und Tokyo Night ebenso. Eine Mischung mit der
+/// Textfarbe hat dagegen in jedem Theme Kontrast, weil Text auf der Fläche
+/// lesbar sein muss.
+export function linie(flaeche: string, text: string, anteil = 0.5): string {
+  const zahl = (h: string, i: number) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16);
+  const mix = (i: number) =>
+    Math.round(zahl(flaeche, i) * (1 - anteil) + zahl(text, i) * anteil)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${mix(0)}${mix(1)}${mix(2)}`;
+}
+
 /// Überträgt ein Theme auf die CSS-Variablen der Seite; die Defaults in den
 /// HTML-Styleblöcken sind Mocha. Fehlt einem Theme ein Farbwert, bleibt der
 /// Mocha-Default stehen.
@@ -12,10 +30,10 @@ export function applyTheme(picked: (typeof THEMES)[string]) {
     "--surface": picked.header,
     "--tile": x.background,
     "--line": picked.border,
-    "--line-strong": x.black,
+    "--line-strong": linie(picked.header, x.foreground),
     "--text": x.foreground,
-    "--muted": x.brightWhite,
-    "--faint": x.brightBlack,
+    "--muted": linie(picked.header, x.foreground, 0.82),
+    "--faint": linie(picked.header, x.foreground, 0.62),
     "--accent": x.blue,
     "--ok": x.green,
     "--warn": x.yellow,

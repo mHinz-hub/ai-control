@@ -30,6 +30,9 @@ body {
   box-sizing: border-box;
   border: 1px solid var(--line);
 }
+.panel-head[hidden] {
+  display: none;
+}
 .panel-head {
   flex: none;
   display: flex;
@@ -71,6 +74,47 @@ body {
 }
 .panel-topbar .panel-tabs {
   margin-left: auto;
+}
+/* Projekt-Icon und Titel links, wie im Terminal-Fenster. */
+.panel-topbar #project-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  margin-right: 10px;
+}
+.panel-topbar #project-icon[hidden] {
+  display: none;
+}
+.panel-topbar #project-name {
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Desktop mit Knöpfen links: die Knopfgruppe wandert an den Anfang der
+   Topbar (Schließen ganz außen), der Rest rückt nach rechts. */
+/* Knöpfe links: rechts bleibt Rand, sonst klebt die Tab-Leiste an der
+   Fensterkante. */
+:root[data-winbtns="left"] .panel-topbar {
+  padding-left: 0;
+  padding-right: 12px;
+}
+:root[data-winbtns="left"] .panel-topbar .winbtn {
+  order: -1;
+}
+:root[data-winbtns="left"] .panel-topbar .winbtn.close {
+  order: -4;
+}
+:root[data-winbtns="left"] .panel-topbar #win-max {
+  order: -3;
+}
+:root[data-winbtns="left"] .panel-topbar #win-min {
+  order: -2;
+}
+:root[data-winbtns="left"] .commit-heading,
+:root[data-winbtns="left"] .panel-topbar #project-icon,
+:root[data-winbtns="left"] .panel-topbar #project-icon[hidden] + #project-name {
+  margin-left: 14px;
 }
 /* Fensterknöpfe rechts, volle Header-Höhe — wie im Terminal-Fenster. */
 .winbtn {
@@ -118,6 +162,14 @@ body {
 /* Resize-Zonen für das dekorationslose Fenster (nur Linux). */
 #resize-grips {
   display: none;
+}
+/* Die Zieh-Zonen liegen als 4 px breite Streifen über den Fensterkanten.
+   Ein Scrollbalken direkt daneben lässt den Zeiger beim Zielen zwischen
+   „scrollen" und „Fenstergröße" springen — die scrollenden Flächen halten
+   darum Abstand zur Kante. */
+:root[data-platform="other"] #panel-content {
+  margin-right: 8px;
+  margin-bottom: 8px;
 }
 :root[data-platform="other"] #resize-grips {
   display: block;
@@ -226,6 +278,10 @@ body {
   font: inherit;
   display: flex;
   align-items: center;
+  justify-content: center;
+  /* Trefferfläche mindestens 24×24 px (WCAG 2.2, SC 2.5.8). */
+  min-width: 24px;
+  min-height: 24px;
 }
 .panel-btn:hover {
   background: var(--line);
@@ -369,8 +425,61 @@ body {
 #panel-content.md a {
   color: var(--accent);
 }
+/* Tabellen mit Rändern und linksbündigem Kopf: ohne Ränder verschwimmen die
+   Spalten, und die zentrierte Kopfzelle des Browsers steht versetzt über
+   ihren Werten. Eine Ausrichtung aus dem Markdown (`:---:`) kommt als
+   align-Attribut und behält Vorrang. */
+#panel-content.md table {
+  border-collapse: collapse;
+  margin: 0 0 0.7em;
+}
+#panel-content.md td,
+#panel-content.md th {
+  border: 1px solid var(--line-strong);
+  padding: 5px 9px;
+  vertical-align: top;
+}
+#panel-content.md th {
+  background: var(--surface);
+}
+#panel-content.md th:not([align]) {
+  text-align: left;
+}
 .panel-btn[hidden],
 .panel-lang[hidden],
 #panel-content[hidden] {
   display: none;
+}
+/* Druck („Drucken / als PDF speichern"): nur der Dokumentinhalt, schwarz auf
+   weiß. Die Theme-Variablen kommen als Inline-Style von applyTheme, darum
+   !important. */
+@media print {
+  :root {
+    --bg: #fff !important;
+    --surface: #fff !important;
+    --tile: #f2f2f2 !important;
+    --line: #ddd !important;
+    --line-strong: #bbb !important;
+    --text: #000 !important;
+    --muted: #333 !important;
+    --faint: #666 !important;
+    --accent: #1a4fa0 !important;
+  }
+  .panel-topbar,
+  .panel-head,
+  #resize-grips {
+    display: none !important;
+  }
+  /* Block- statt Flex-Fluss: Flex-Container paginieren in WebKit nicht
+     zuverlässig über die erste Seite hinaus. */
+  html,
+  body {
+    display: block;
+    height: auto;
+    overflow: visible;
+    border: none !important;
+  }
+  #panel-content {
+    overflow: visible;
+  }
 }

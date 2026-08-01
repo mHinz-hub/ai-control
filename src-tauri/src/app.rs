@@ -15,24 +15,36 @@ use crate::{commands, terminal};
 #[cfg(target_os = "linux")]
 pub(crate) struct PopupBlurGuard(pub(crate) std::sync::Arc<std::sync::atomic::AtomicBool>);
 
+/// Monitor unter dem physischen Punkt; ohne Treffer der Monitor des Fensters.
+fn monitor_at(w: &tauri::WebviewWindow, x: f64, y: f64) -> Option<tauri::Monitor> {
+  w.monitor_from_point(x, y)
+    .ok()
+    .flatten()
+    .or_else(|| w.current_monitor().ok().flatten())
+}
+
+/// Popup auf die linke obere Ecke (px|py) setzen, geklemmt in den Monitor
+/// unter dem Ankerpunkt (ref_x|ref_y) — dem Klick bzw. dem Tray-Icon.
+fn place_popup(w: &tauri::WebviewWindow, px: i32, py: i32, ref_x: f64, ref_y: f64) {
+  use tauri::{PhysicalPosition, PhysicalSize};
+  let size = w.outer_size().unwrap_or_else(|_| PhysicalSize::new(320, 300));
+  let (mon_pos, mon_size) = monitor_at(w, ref_x, ref_y)
+    .map(|m| (*m.position(), *m.size()))
+    .unwrap_or((PhysicalPosition::new(0, 0), PhysicalSize::new(1920, 1080)));
+  let max_x = mon_pos.x + mon_size.width as i32 - size.width as i32;
+  let max_y = mon_pos.y + mon_size.height as i32 - size.height as i32;
+  let x = px.clamp(mon_pos.x, max_x.max(mon_pos.x));
+  let y = py.clamp(mon_pos.y, max_y.max(mon_pos.y));
+  let _ = w.set_position(PhysicalPosition::new(x, y));
+}
+
 /// Popup an den Klick-Koordinaten platzieren, in den Monitor geklemmt.
 #[cfg(target_os = "linux")]
 fn position_popup(w: &tauri::WebviewWindow, x: i32, y: i32) {
-  use tauri::{PhysicalPosition, PhysicalSize};
-  let size = w.outer_size().unwrap_or_else(|_| PhysicalSize::new(320, 300));
-  let (mon_pos, mon_size) = w
-    .current_monitor()
-    .ok()
-    .flatten()
-    .map(|m| (*m.position(), *m.size()))
-    .unwrap_or((PhysicalPosition::new(0, 0), PhysicalSize::new(1920, 1080)));
   // Rechte Kante an den Klick; oben/unten ergibt sich aus dem Klemmen an die
   // Monitorkante (Panel oben -> unter dem Icon, Panel unten -> darüber).
-  let max_x = mon_pos.x + mon_size.width as i32 - size.width as i32;
-  let max_y = mon_pos.y + mon_size.height as i32 - size.height as i32;
-  let px = (x - size.width as i32).clamp(mon_pos.x, max_x.max(mon_pos.x));
-  let py = y.clamp(mon_pos.y, max_y.max(mon_pos.y));
-  let _ = w.set_position(PhysicalPosition::new(px, py));
+  let width = w.outer_size().map(|s| s.width as i32).unwrap_or(320);
+  place_popup(w, x - width, y, x as f64, y as f64);
 }
 
 /// Popup zeigen — ein Codepfad für alle OS, nur die Platzierung folgt dem
@@ -48,18 +60,26 @@ pub(crate) fn show_popup(app: &tauri::AppHandle, anchor: Anchor) {
       // Nativer Tray (macOS/Windows): rechte Popup-Kante an der rechten
       // Icon-Kante; macOS unter dem Menüleisten-Icon, Windows über der Taskbar.
       Anchor::IconRect { rect, popup_below } => {
-        let scale = w.scale_factor().unwrap_or(1.0);
+        // Umgerechnet wird mit dem Scale des Monitors unter dem Icon, nicht mit
+        // dem des Popup-Fensters: bei gemischten Faktoren liegt das Rect sonst
+        // um den Faktorquotienten daneben, wachsend mit dem Abstand zum
+        // Ursprung — auf dem Nachbarschirm reicht das über eine Monitorbreite.
+        let probe = rect.position.to_physical::<f64>(w.scale_factor().unwrap_or(1.0));
+        let scale = monitor_at(&w, probe.x, probe.y)
+          .map(|m| m.scale_factor())
+          .unwrap_or(1.0);
         let pos = rect.position.to_physical::<f64>(scale);
         let size = rect.size.to_physical::<f64>(scale);
-        let win_w = w.outer_size().map(|s| s.width as f64).unwrap_or(320.0);
-        let x = (pos.x + size.width - win_w).max(0.0);
-        let y = if popup_below {
-          pos.y + size.height
+        let win = w
+          .outer_size()
+          .unwrap_or_else(|_| tauri::PhysicalSize::new(320, 300));
+        let px = (pos.x + size.width) as i32 - win.width as i32;
+        let py = if popup_below {
+          (pos.y + size.height) as i32
         } else {
-          let win_h = w.outer_size().map(|s| s.height as f64).unwrap_or(300.0);
-          (pos.y - win_h).max(0.0)
+          pos.y as i32 - win.height as i32
         };
-        let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
+        place_popup(&w, px, py, pos.x, pos.y);
       }
       // SNI (KDE/XFCE/Cinnamon): Activate-Koordinaten, wenn der Host welche
       // mitgibt (Cinnamon); sonst Zeigerposition — der Zeiger sitzt beim
@@ -299,6 +319,7 @@ fn invoke_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send +
     commands::git_push_check,
     commands::git_commit,
     commands::spellcheck_lang,
+    commands::window_buttons_left,
     commands::enabled_modules,
     commands::module_registry,
     commands::set_module,
@@ -323,9 +344,17 @@ fn invoke_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send +
     terminal::archive_folders,
     terminal::panel_save_as,
     terminal::archive_delete,
+    terminal::archive_delete_folder,
     terminal::archive_create_folder,
+    terminal::archive_read_file,
+    terminal::archive_import,
+    terminal::drawio_available,
+    terminal::drawio_open,
     terminal::archive_create_doc,
     terminal::archive_create_html,
+    terminal::archive_create_text,
+    terminal::archive_write_text,
+    terminal::archive_create_drawio,
     terminal::open_panel_window,
     terminal::open_commit_window
   ]

@@ -6,11 +6,23 @@
 /// Inhalt die Kindliste. Titel, Beschreibungen und Pfade sind Fremdtext und
 /// gehen nie durch innerHTML; der Markdown-Body läuft durch renderMarkdown.
 
+import { load as yamlLoad } from "js-yaml";
+import drawioViewerUrl from "./assets/drawio-viewer.min.js?url";
+import { dataTree, xmlTree } from "./data-tree";
 import { renderEpub, type EpubBook } from "./epub-view";
 import { initHtmlEditor } from "./html-editor";
+import { markiere } from "./highlight";
 import { renderMarkdown } from "./markdown";
+import {
+  initMdEditor,
+  mdTabelle,
+  spracheZu,
+  type MdEditor,
+  type Sprache,
+} from "./md-editor";
 import { t } from "./messages";
 import { linkWikiRefs } from "./panel-view";
+import { openTableForm } from "./table-form";
 import { deleteAction } from "./tiles";
 
 interface DocEntry {
@@ -24,11 +36,12 @@ interface DocEntry {
   tags: string[];
   date?: string | null;
   backlinks: number;
-  /// Letzte Änderung (Datei-mtime, YYYY-MM-DD).
+  /// Letzte Änderung (Datei-mtime) als voller ISO-Zeitstempel
+  /// (`YYYY-MM-DDTHH:MM:SSZ`) — Anzeige kürzt, Sortierung nutzt ihn ganz.
   modified: string;
-  /// Notiz-Typ: `md` (Markdown), `html` oder `epub` (Buch — Ansicht statt
-  /// Editor).
-  kind: "md" | "html" | "epub";
+  /// Notiz-Typ: `md` (Markdown), `html`, `epub` (Buch — Ansicht statt
+  /// Editor) oder `file` (sonstige Datei — Rohtext-Ansicht).
+  kind: "md" | "html" | "epub" | "file";
 }
 
 interface Folder {
@@ -54,6 +67,17 @@ export interface WikiActions {
   /// Liefern die ID der neuen Notiz — die Ansicht öffnet sie im Editor.
   createDoc(parent: string, name: string): Promise<string>;
   createHtml(parent: string, name: string): Promise<string>;
+  /// Datei-Dialog öffnen und die Auswahl in den Ordner des Knotens kopieren.
+  importFiles(parent: string): void;
+  /// Datei im Dateimanager des Systems zeigen (absoluter Pfad).
+  reveal(path: string): void;
+  /// Ordner samt Inhalt löschen (Pfad relativ zum Archiv-Home).
+  removeFolder(path: string): void;
+  /// Leeres Diagramm neben der Notiz anlegen; liefert den relpath.
+  createDrawio(near: string, name: string): Promise<string>;
+  /// Rohdaten-Datei anlegen (Klartext, JSON, YAML, XML); liefert ihre
+  /// Pfad-Adresse (`path:<relpath>`).
+  createText(parent: string, name: string, art: string): Promise<string>;
 }
 
 export interface WikiCallbacks {
@@ -61,8 +85,17 @@ export interface WikiCallbacks {
   autoStart?: boolean;
   /// Body eines Archiv-Dokuments (ohne Frontmatter) für die Notiz-Ansicht.
   readDoc(id: string): Promise<string>;
+  /// Rohtext einer sonstigen Archiv-Datei (`file`-Knoten).
+  readFile(id: string): Promise<string>;
+  /// Ist die draw.io-Desktop-App installiert? (Beim Start geprüft.)
+  drawioAvailable(): boolean;
+  /// `.drawio`-Datei in der draw.io-Desktop-App öffnen.
+  openDrawio(id: string): void;
   /// Body einer Archiv-Notiz zurückschreiben (Bearbeiten im Archiv).
   writeDoc(id: string, text: string): Promise<void>;
+  /// Rohdaten-Datei zurückschreiben — ohne Frontmatter, der Inhalt ist die
+  /// Datei.
+  writeFile(id: string, text: string): Promise<void>;
   /// Buch öffnen: entpacken und Lesereihenfolge, Inhaltsverzeichnis und
   /// Metadaten aus seinen Verwaltungsdateien holen.
   openEpub(id: string): Promise<EpubBook>;
@@ -72,6 +105,8 @@ export interface WikiCallbacks {
   openWiki(name: string): void;
   /// Vorgemerkte Auswahl (Suchtreffer-Sprung): einmalig abholen.
   takePending?(): string | null;
+  /// Wörter des Suchtreffers — sie werden im geöffneten Dokument markiert.
+  takeMarks?(): string[];
   actions: WikiActions;
 }
 
@@ -87,7 +122,18 @@ interface TreeNode {
   children: Map<string, TreeNode>;
   docs: DocEntry[];
   content?: DocEntry;
+  /// Voller Ordnerpfad relativ zum Archiv-Home ("" = Wurzel).
+  path: string;
 }
+
+type SortFeld = "name" | "changed" | "created";
+
+/// Beschriftungen der Sortierfelder.
+const SORTFELDER: Record<SortFeld, string> = {
+  name: "wiki.sortName",
+  changed: "wiki.sortChanged",
+  created: "wiki.sortCreated",
+};
 
 /// JS-Seite der slugify-Semantik aus archive.rs — für die lokale Auflösung
 /// von Wikilinks gegen Name/Titel/Stem.
@@ -109,14 +155,42 @@ function stem(relpath: string): string {
   return base.replace(/\.md$/, "");
 }
 
+/// Eine draw.io-Datei unter den sonstigen Dateien — bekommt den
+/// Diagramm-Viewer statt der Rohtext-Ansicht.
+function istDrawio(doc: { relpath: string }): boolean {
+  return doc.relpath.endsWith(".drawio");
+}
+
+/// Ein Diagramm ohne Figuren (frisch angelegt) zeichnet nichts — es braucht
+/// einen sichtbaren Platzhalter statt einer leeren Stelle. Gezählt werden nur
+/// Figuren und Kanten; die beiden Wurzelzellen (`0`, `1`) stehen in jeder
+/// Datei.
+///
+/// Speichert draw.io komprimiert, steht im `<diagram>` statt des Modells ein
+/// Base64-Deflate-Text; auspacken kann ihn allein der Viewer, eine solche Datei
+/// gilt hier also als gefüllt. Der frühere Test zählte `<mxCell`-Vorkommen im
+/// Rohtext und hielt jedes komprimiert gespeicherte Diagramm für leer.
+export function drawioLeer(xml: string): boolean {
+  const dom = new DOMParser().parseFromString(xml, "application/xml");
+  if (dom.querySelector("parsererror")) return false;
+  for (const d of dom.querySelectorAll("diagram")) {
+    if (!d.firstElementChild && d.textContent?.trim()) return false;
+  }
+  return dom.querySelectorAll("mxCell[vertex], mxCell[edge]").length === 0;
+}
+
 function buildTree(p: Page): TreeNode {
-  const root: TreeNode = { children: new Map(), docs: [] };
+  const root: TreeNode = { children: new Map(), docs: [], path: "" };
   const node = (path: string): TreeNode => {
     let n = root;
     if (!path) return n;
     for (const part of path.split("/")) {
       if (!n.children.has(part)) {
-        n.children.set(part, { children: new Map(), docs: [] });
+        n.children.set(part, {
+          children: new Map(),
+          docs: [],
+          path: n.path ? `${n.path}/${part}` : part,
+        });
       }
       n = n.children.get(part)!;
     }
@@ -125,38 +199,34 @@ function buildTree(p: Page): TreeNode {
   for (const folder of p.folders) {
     if (folder.name) node(folder.name);
   }
-  // Dokumente einhängen; ein Dokument mit gleichnamigem Ordner daneben wird
-  // dessen Notiz-Inhalt statt eigenes Blatt.
+  // Die index-Notiz eines Ordners ist sein Knotentext — für die Wurzel wie
+  // für jeden Unterordner —, kein eigenes Blatt in der Übersicht.
   for (const folder of p.folders) {
     const parent = node(folder.name);
     for (const doc of folder.docs) {
-      const twin = parent.children.get(doc.name);
-      if (twin && !twin.content) twin.content = doc;
+      if (doc.name === "index" && !parent.content) parent.content = doc;
       else parent.docs.push(doc);
     }
-  }
-  // Wurzel-Konvention: `index.md` im Archiv-Root ist der Text des
-  // Archiv-Knotens (die Wurzel hat keinen Namen für die Zwillingsregel).
-  const idx = root.docs.findIndex((d) => d.name === "index");
-  if (idx >= 0 && !root.content) {
-    root.content = root.docs[idx];
-    root.docs.splice(idx, 1);
   }
   return root;
 }
 
 export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiView {
-  /// Zugeklappte Knoten und Auswahl — beides über die technische ID der
-  /// Notiz ("" = Archiv-Wurzel); übersteht Umbenennen, Verschieben und
-  /// Puffer-Updates.
-  const closed = new Set<string>();
+  /// Auswahl über die technische ID der Notiz ("" = Archiv-Wurzel);
+  /// übersteht Umbenennen, Verschieben und Puffer-Updates. Der Baum kennt
+  /// keinen eigenen Klapp-Zustand: offen ist genau der Pfad zur Auswahl.
   let selected = "";
   let current: Page | null = null;
-  let tree: TreeNode = { children: new Map(), docs: [] };
+  let tree: TreeNode = { children: new Map(), docs: [], path: "" };
   /// Auswahl-Verlauf für den Zurück-Knopf der Notiz-Ansicht.
   const history: string[] = [];
   /// Bearbeitungsmodus der aktuellen Notiz (Editor statt Anzeige).
   let editing = false;
+  /// Vorschau des offenen Markdown-Editors neu zeichnen. Ein Puffer-Update
+  /// während der Bearbeitung geht nur hierüber: Der Editortext bleibt stehen,
+  /// aber die eingebetteten Diagramme werden neu gelesen — genau das braucht
+  /// der Ablauf „Diagramm einfügen, in draw.io zeichnen, speichern".
+  let previewRedraw: (() => void) | null = null;
   /// Eben angelegte Notiz: sobald sie in der Übersicht auftaucht, wird sie
   /// ausgewählt und der Editor geöffnet.
   let pendingEdit: string | null = null;
@@ -201,18 +271,30 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     return null;
   }
 
-  /// Elternknoten einer Notiz — Ziel beim Anlegen von Kindern.
-  function parentOf(id: string, from: TreeNode = tree): TreeNode | null {
-    if (from.docs.some((d) => d.id === id)) return from;
+  /// Ordner-Kette zu einer ID (wurzelnah zuerst, ohne Wurzel; der Ordner der
+  /// ID selbst ist das letzte Glied).
+  function ancestors(id: string, from: TreeNode, acc: TreeNode[] = []): TreeNode[] | null {
+    if (from.content?.id === id || from.docs.some((d) => d.id === id)) return acc;
     for (const child of from.children.values()) {
-      if (child.content?.id === id) return from;
-      const hit = parentOf(id, child);
+      const hit = ancestors(id, child, [...acc, child]);
       if (hit) return hit;
     }
     return null;
   }
 
+  /// Knoten zu einem Ordnerpfad im aktuellen Baum.
+  function nodeByPath(path: string): TreeNode | null {
+    let n = tree;
+    if (!path) return n;
+    for (const part of path.split("/")) {
+      const next = n.children.get(part);
+      if (!next) return null;
+      n = next;
+    }
+    return n;
+  }
 
+  /// Elternknoten einer Notiz — Ziel beim Anlegen von Kindern.
   /// Wikilink lokal auflösen (Name, Titel, Stem — Slug-Vergleich wie im
   /// Backend); ohne Treffer übernimmt das Backend (Dokument-Tab).
   function followWikiLink(name: string) {
@@ -264,34 +346,116 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     container.append(menu);
   }
 
+  /// Sortier-Menü: eine Zeile je Feld, Reihenfolge der Zeilen = Rangfolge
+  /// der Sortierung (oben zuerst, bei Gleichstand die nächste). Ein Klick auf
+  /// ↑/↓ setzt die Richtung UND hebt die Zeile an die Spitze — ohne Ziffern,
+  /// die Liste selbst ist die Aussage. Das Menü bleibt offen, damit sich die
+  /// Staffelung in einem Zug legen lässt.
+  function openSortMenu(x: number, y: number, onChange: () => void) {
+    container.querySelector(".wiki-menu")?.remove();
+    const menu = document.createElement("div");
+    menu.className = "wiki-menu wiki-sort-menu";
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    const zeichnen = () => {
+      menu.textContent = "";
+      sortOrder.forEach(([feld, richtung], rang) => {
+        const zeile = document.createElement("div");
+        zeile.className = "wiki-sort-row" + (rang === 0 ? " first" : "");
+        const name = document.createElement("span");
+        name.className = "wiki-sort-name";
+        name.textContent = t(SORTFELDER[feld]);
+        const pfeile = document.createElement("div");
+        pfeile.className = "wiki-sort-dirs";
+        for (const dir of ["asc", "desc"] as const) {
+          const b = document.createElement("button");
+          b.className =
+            "wiki-sort-dir" + (richtung === dir && rang === 0 ? " active" : "");
+          b.textContent = dir === "asc" ? "↑" : "↓";
+          b.title = t(dir === "asc" ? "wiki.sortAsc" : "wiki.sortDesc");
+          b.addEventListener("click", () => {
+            sortOrder = [
+              [feld, dir],
+              ...sortOrder.filter(([f]) => f !== feld),
+            ];
+            zeichnen();
+            onChange();
+          });
+          pfeile.append(b);
+        }
+        zeile.append(name, pfeile);
+        menu.append(zeile);
+      });
+    };
+    zeichnen();
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent && e.key !== "Escape") return;
+      if (e instanceof MouseEvent && menu.contains(e.target as Node)) return;
+      menu.remove();
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+    setTimeout(() => {
+      document.addEventListener("mousedown", close);
+      document.addEventListener("keydown", close);
+    });
+    container.append(menu);
+  }
+
   // ---------- Baum-Spalte ----------
 
-  /// Typ-Symbol im Baum (Stroke-SVG wie die übrigen App-Icons): neutraler
-  /// Knoten-Kreis für Ordner-Notizen, Blatt für Dokumente.
-  function typeIcon(kind: "node" | "doc" | "html" | "epub"): HTMLElement {
+  /// Typ-Symbol (Stroke-SVG wie die übrigen App-Icons): Ordner für Knoten,
+  /// je ein Symbol pro Dateityp für die Übersicht.
+  function typeIcon(
+    kind: "node" | "nodeOpen" | "doc" | "html" | "epub" | "file" | "diagram" | "image",
+  ): HTMLElement {
     const span = document.createElement("span");
     span.className = "wiki-tree-icon";
     const shapes = {
-      node: `<circle cx="8" cy="8" r="4.2"/>`,
+      // Geschlossener Ordner mit Reiter.
+      node: `<path d="M1.8 4.6a1 1 0 0 1 1-1h3.1l1.5 1.7h5.8a1 1 0 0 1 1 1v6.1a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1z"/>`,
+      // Offener Ordner: Rückwand plus aufgeklappte Front.
+      nodeOpen: `<path d="M1.8 12.4V4.6a1 1 0 0 1 1-1h3.1l1.5 1.7h5.2v1.7"/><path d="M3.9 7.9h10.3l-1.7 4.8a1 1 0 0 1-.9.7H1.8z"/>`,
       doc: `<path d="M4 1.5h5.5L12.5 5v9a.9.9 0 0 1-.9.9H4a.9.9 0 0 1-.9-.9V2.4a.9.9 0 0 1 .9-.9z"/><path d="M9.5 1.5V5H13"/><path d="M5.8 8h4.4M5.8 10.5h4.4"/>`,
       // HTML-Notiz: dasselbe Blatt, spitze Klammern statt Textzeilen.
       html: `<path d="M4 1.5h5.5L12.5 5v9a.9.9 0 0 1-.9.9H4a.9.9 0 0 1-.9-.9V2.4a.9.9 0 0 1 .9-.9z"/><path d="M9.5 1.5V5H13"/><path d="M6.6 8.2 5.2 9.6l1.4 1.4M9.4 8.2l1.4 1.4-1.4 1.4"/>`,
       // Buch: aufgeschlagene Doppelseite.
       epub: `<path d="M8 4.2C6.8 3.2 5.1 2.8 3 2.8v9.4c2.1 0 3.8.4 5 1.4 1.2-1 2.9-1.4 5-1.4V2.8c-2.1 0-3.8.4-5 1.4z"/><path d="M8 4.2v9.4"/>`,
+      // Sonstige Datei: dasselbe Blatt, geschweifte Klammern.
+      file: `<path d="M4 1.5h5.5L12.5 5v9a.9.9 0 0 1-.9.9H4a.9.9 0 0 1-.9-.9V2.4a.9.9 0 0 1 .9-.9z"/><path d="M9.5 1.5V5H13"/><path d="M6.8 7.6c-1 0-.4 1.6-1.5 1.6 1.1 0 .5 1.6 1.5 1.6M9.2 7.6c1 0 .4 1.6 1.5 1.6-1.1 0-.5 1.6-1.5 1.6"/>`,
+      // Diagramm: zwei Kästen mit Verbinder.
+      diagram: `<rect x="1.8" y="2.2" width="5.4" height="3.6" rx="0.8"/><rect x="8.8" y="10.2" width="5.4" height="3.6" rx="0.8"/><path d="M4.5 5.8v3.4a1.6 1.6 0 0 0 1.6 1.6h5.4"/>`,
+      // Bild: Rahmen mit Sonne und Bergzug.
+      image: `<rect x="2" y="2.6" width="12" height="10.8" rx="1"/><circle cx="5.6" cy="6" r="1.1"/><path d="M2.6 12.2l3.4-3.4 2.4 2.4 3.1-3.1 1.9 1.9"/>`,
     };
-    span.innerHTML = `<svg width="17" height="17" viewBox="0 0 16 16">${shapes[kind]}</svg>`;
+    // Ohne width/height: die Größe kommt aus dem Stylesheet (Regel 1.4).
+    span.innerHTML = `<svg viewBox="0 0 16 16">${shapes[kind]}</svg>`;
     return span;
   }
 
+  /// Übersichts-Symbol einer Datei: Typ aus Notiz-Art bzw. Datei-Endung.
+  function docIcon(doc: DocEntry): HTMLElement {
+    if (doc.kind === "md") return typeIcon("doc");
+    if (doc.kind !== "file") return typeIcon(doc.kind);
+    const ext = doc.relpath.toLowerCase().split(".").pop() ?? "";
+    if (ext === "drawio") return typeIcon("diagram");
+    if (["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext)) return typeIcon("image");
+    return typeIcon("file");
+  }
+
+  /// Liegt die Auswahl in diesem Teilbaum (Knoten selbst, ein Dokument darin
+  /// oder tiefer)?
+  function containsSelected(node: TreeNode): boolean {
+    if (node.content?.id === selected) return true;
+    if (node.docs.some((d) => d.id === selected)) return true;
+    return [...node.children.values()].some(containsSelected);
+  }
+
   function folderRow(name: string, full: string, node: TreeNode): HTMLElement {
-    const key = node.content?.id ?? full;
     const det = document.createElement("details");
     det.className = "wiki-tree-folder";
-    det.open = !closed.has(key);
-    det.addEventListener("toggle", () => {
-      if (det.open) closed.delete(key);
-      else closed.add(key);
-    });
+    // Offen ist genau der Strang zur Auswahl — nie mehrere Äste zugleich.
+    det.open = containsSelected(node);
     const sum = document.createElement("summary");
     sum.classList.add(node.content ? "has-content" : "book");
     if (node.content?.id === selected) {
@@ -303,68 +467,34 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
       e.preventDefault();
       select(node.content?.id ?? "");
     });
-    const arrow = document.createElement("span");
-    arrow.className = "wiki-tree-arrow";
-    arrow.textContent = "▸";
-    arrow.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      det.open = !det.open;
-    });
+    // Das Ordner-Symbol zeigt den Zustand (offen/geschlossen); Klick wählt
+    // den Ordner aus — das öffnet seinen Strang und schließt alle anderen.
+    const icon = typeIcon(det.open ? "nodeOpen" : "node");
     const label = document.createElement("span");
     label.className = "wiki-tree-name";
     label.textContent = node.content?.title ?? name;
     sum.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const id = node.content?.id ?? "";
-      openMenu(e.clientX, e.clientY, [
-        { label: t("wiki.newDoc"), run: () => newDocForm(id) },
-        { label: t("wiki.newHtml"), run: () => newHtmlForm(id) },
-        { label: t("wiki.newFolder"), run: () => newFolderForm(id) },
-      ]);
+      const id = node.content?.id;
+      // Ohne Knotentext gibt es keine Ziel-ID — die Aktionen liefen sonst
+      // kommentarlos an der Wurzel. Die frische Übersicht trägt sie nach.
+      openMenu(
+        e.clientX,
+        e.clientY,
+        id ? anlegeMenue(id) : [{ label: t("wiki.reload"), run: () => cb.openWiki("tag:") }],
+      );
     });
-    sum.append(arrow, typeIcon("node"), label);
+    sum.append(icon, label);
     det.append(sum, renderChildren(node, full));
     return det;
   }
 
-  function docRow(doc: DocEntry): HTMLElement {
-    const row = document.createElement("button");
-    row.className = "wiki-tree-doc";
-    if (doc.id === selected) row.classList.add("active");
-    const label = document.createElement("span");
-    label.className = "wiki-tree-name";
-    label.textContent = doc.title;
-    row.append(typeIcon(doc.kind === "md" ? "doc" : doc.kind), label);
-    row.addEventListener("click", () => select(doc.id));
-    row.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      // Ein Buch wird gelesen, nicht bearbeitet.
-      const edit = {
-        label: t("wiki.editDoc"),
-        run: () => {
-          select(doc.id);
-          editing = true;
-          renderMain();
-        },
-      };
-      const remove = { label: t("wiki.deleteDoc"), run: () => cb.actions.remove(doc.id) };
-      openMenu(e.clientX, e.clientY, doc.kind === "epub" ? [remove] : [edit, remove]);
-    });
-    return row;
-  }
-
+  /// Der Baum zeigt nur die Ordnerstruktur; Dokumente stehen ausschließlich
+  /// in der Übersicht des jeweiligen Ordners.
   function renderChildren(node: TreeNode, path: string): HTMLElement {
     const box = document.createElement("div");
     box.className = "wiki-tree-children";
-    // Unter einem Knoten erst seine Dokumente (weniger eingerückt), dann
-    // seine Ordner (stärker eingerückt) — Skizze: Knoten / Dok (4em) /
-    // Ordner (6em).
-    for (const doc of [...node.docs].sort((a, b) => a.title.localeCompare(b.title))) {
-      box.append(docRow(doc));
-    }
     for (const [name, child] of [...node.children].sort((a, b) =>
       a[0].localeCompare(b[0]),
     )) {
@@ -380,20 +510,55 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     head.className = "wiki-tree-head";
     const root = document.createElement("button");
     root.className = "wiki-tree-root" + (selected === "" ? " active" : "");
-    root.textContent = t("wiki.archive");
+    // Die Wurzel trägt ihren echten Namen: den Ordnernamen des Archiv-Home —
+    // wie jeder andere Ordner im Baum. Offenes Symbol: immer aufgeklappt.
+    const rootLabel = document.createElement("span");
+    rootLabel.className = "wiki-tree-name";
+    rootLabel.textContent =
+      current?.home.replace(/\/+$/, "").split("/").pop() || t("wiki.archive");
+    root.append(typeIcon("nodeOpen"), rootLabel);
     root.addEventListener("click", () => select(""));
     root.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      openMenu(e.clientX, e.clientY, [
-        { label: t("wiki.newDoc"), run: () => newDocForm("") },
-        { label: t("wiki.newHtml"), run: () => newHtmlForm("") },
-        { label: t("wiki.newFolder"), run: () => newFolderForm("") },
-      ]);
+      openMenu(e.clientX, e.clientY, anlegeMenue(""));
     });
     head.append(root);
     aside.append(head, renderChildren(tree, ""));
     return aside;
+  }
+
+  /// Bestätigungsdialog fürs Löschen: Frage plus Löschen/Abbrechen, gleiche
+  /// Optik wie die Anlege-Dialoge.
+  function confirmBox(text: string, onOk: () => void) {
+    document.querySelector(".wiki-modal")?.remove();
+    const backdrop = document.createElement("div");
+    backdrop.className = "wiki-modal";
+    const form = document.createElement("div");
+    form.className = "wiki-form";
+    const caption = document.createElement("div");
+    caption.className = "wiki-form-title";
+    caption.textContent = text;
+    const row = document.createElement("div");
+    row.className = "wiki-form-row";
+    const ok = document.createElement("button");
+    ok.className = "wiki-form-submit";
+    ok.textContent = t("wiki.deleteFolder");
+    ok.addEventListener("click", () => {
+      backdrop.remove();
+      onOk();
+    });
+    const cancel = document.createElement("button");
+    cancel.className = "wiki-form-cancel";
+    cancel.textContent = t("wiki.cancel");
+    cancel.addEventListener("click", () => backdrop.remove());
+    backdrop.addEventListener("mousedown", (e) => {
+      if (e.target === backdrop) backdrop.remove();
+    });
+    row.append(ok, cancel);
+    form.append(caption, row);
+    backdrop.append(form);
+    container.append(backdrop);
   }
 
   // ---------- Anlege-Formular (Ordner/Dokument) ----------
@@ -414,6 +579,32 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     openForm(t("wiki.newFolder"), t("wiki.docName"), "", (v) =>
       cb.actions.createFolder(parent, v),
     );
+  }
+
+  /// Was sich unter einem Knoten anlegen lässt — gleiche Liste am Plus wie im
+  /// Kontextmenü des Baums.
+  function anlegeMenue(parent: string): { label: string; run(): void }[] {
+    return [
+      { label: t("wiki.newFolder"), run: () => newFolderForm(parent) },
+      { label: t("wiki.newDoc"), run: () => newDocForm(parent) },
+      { label: t("wiki.newHtml"), run: () => newHtmlForm(parent) },
+      { label: t("wiki.new_text"), run: () => newTextForm(parent, "text") },
+      { label: t("wiki.new_json"), run: () => newTextForm(parent, "json") },
+      { label: t("wiki.new_yaml"), run: () => newTextForm(parent, "yaml") },
+      { label: t("wiki.new_xml"), run: () => newTextForm(parent, "xml") },
+      { label: t("wiki.addFiles"), run: () => cb.actions.importFiles(parent) },
+    ];
+  }
+
+  /// Rohdaten-Datei: Klartext, JSON, YAML oder XML. Sie bekommt kein
+  /// Frontmatter — der Inhalt ist die Datei, angesprochen wird sie über den
+  /// Pfad.
+  function newTextForm(parent: string, art: "text" | "json" | "yaml" | "xml") {
+    openForm(t(`wiki.new_${art}`), t("wiki.docName"), "", (v) => {
+      // Wie bei Notizen: sobald die neue Datei in der Übersicht steht, wird
+      // sie ausgewählt und geöffnet.
+      void cb.actions.createText(parent, v, art).then(openNew);
+    });
   }
 
   /// Modaler Dialog mit einem Textfeld: Anlegen/Abbrechen; Enter legt an,
@@ -455,9 +646,15 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     backdrop.addEventListener("mousedown", (e) => {
       if (e.target === backdrop) backdrop.remove();
     });
+    // Escape schließt auch dann, wenn der Fokus nicht im Formular sitzt.
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      backdrop.remove();
+      document.removeEventListener("keydown", esc);
+    };
+    document.addEventListener("keydown", esc);
     form.addEventListener("keydown", (e) => {
       if (e.key === "Enter") fire();
-      else if (e.key === "Escape") backdrop.remove();
     });
     row.append(submit, cancel);
     form.append(caption, input, row);
@@ -505,10 +702,10 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     // Klick auf den Titel bearbeitet ihn direkt (Frontmatter-Titel der
     // Notiz); Enter übernimmt, Escape verwirft. Der technische Datei-/
     // Ordnername bleibt davon unberührt — der sitzt im Baum-Kontextmenü.
-    // Der Titel eines Buchs steht in seiner Datei — er wird hier nicht
-    // umgeschrieben.
+    // Der Titel eines Buchs steht in seiner Datei, der einer sonstigen Datei
+    // ist ihr Name — beide werden hier nicht umgeschrieben.
     const titleDoc = findDoc(selected) ?? nodeById(selected)?.content;
-    if (titleDoc && titleDoc.kind !== "epub" && !editing) {
+    if (titleDoc && titleDoc.kind !== "epub" && titleDoc.kind !== "file" && !editing) {
       h.classList.add("editable");
       h.title = t("wiki.titleEdit");
       h.addEventListener("click", () => {
@@ -571,6 +768,48 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   /// Gerenderter Markdown-Body; lädt asynchron nach — verworfen, wenn die
   /// Auswahl inzwischen gewechselt hat. Ladefehler erscheinen im Body statt
   /// still zu verschwinden.
+  /// Wörter des Suchtreffers, bis das Dokument sie zeigt. Der Sprung aus der
+  /// Suche kommt vor dem Inhalt an: Erst lädt die Übersicht, dann die Notiz —
+  /// markiert wird also, sobald der Text steht.
+  let fundstellen: string[] = [];
+  /// Für welche Notiz die Wörter gelten — beim Wechsel auf eine andere sind
+  /// sie hinfällig.
+  let fundstellenId = "";
+
+  /// Die markierten Stellen der offenen Anzeige — daraus bestimmt der
+  /// Wechsel in den Editor, welche Fundstelle gemeint war.
+  let marken: HTMLElement[] = [];
+
+  /// Fundstellen hervorheben und zur ersten scrollen. Die Wörter bleiben
+  /// stehen: Der Editor braucht sie beim Umschalten noch.
+  function zeigeFundstellen(body: HTMLElement) {
+    if (!fundstellen.length || selected !== fundstellenId) return;
+    markiere(body, fundstellen);
+    marken = [...body.querySelectorAll<HTMLElement>("mark.wiki-hit")];
+    marken[0]?.scrollIntoView({ block: "center" });
+  }
+
+  /// Nummer der Fundstelle, die beim Umschalten in den Editor im Bild stand:
+  /// die dem senkrechten Zentrum der Ansicht nächste. Ohne sichtbare Marke
+  /// die erste.
+  function sichtbareFundstelle(): number {
+    if (marken.length < 2) return 0;
+    const flaeche = container.querySelector(".wiki-note-scroll");
+    const kasten = flaeche?.getBoundingClientRect();
+    const mitte = kasten ? kasten.top + kasten.height / 2 : window.innerHeight / 2;
+    let beste = 0;
+    let abstand = Infinity;
+    marken.forEach((m, i) => {
+      const r = m.getBoundingClientRect();
+      const d = Math.abs(r.top + r.height / 2 - mitte);
+      if (d < abstand) {
+        abstand = d;
+        beste = i;
+      }
+    });
+    return beste;
+  }
+
   function noteBody(doc: DocEntry): HTMLElement {
     const body = document.createElement("div");
     body.className = "wiki-note-body";
@@ -582,6 +821,226 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
         // dieselbe Wikilink-Verdrahtung.
         body.innerHTML = doc.kind === "html" ? text : renderMarkdown(text);
         linkWikiRefs(body, followWikiLink);
+        hydrateDrawio(body, doc.relpath);
+        zeigeFundstellen(body);
+      },
+      (e) => {
+        body.textContent = String(e);
+      },
+    );
+    return body;
+  }
+
+  /// Ansicht einer sonstigen Datei: JSON, YAML und XML als faltbarer Baum,
+  /// alles andere unverändert als <pre>. Was sich nicht parsen lässt, zeigt
+  /// den Parserfehler über dem Rohtext — nicht still den Rohtext allein.
+  /// Binärdateien melden den Lesefehler des Backends.
+  function fileBody(doc: DocEntry): HTMLElement {
+    const body = document.createElement("div");
+    body.className = "wiki-note-body";
+    const roh = (text: string) => {
+      const pre = document.createElement("pre");
+      pre.className = "wiki-note-plain";
+      pre.textContent = text;
+      return pre;
+    };
+    const baum = (text: string): HTMLElement => {
+      const p = doc.relpath.toLowerCase();
+      try {
+        if (p.endsWith(".json")) return dataTree(JSON.parse(text));
+        if (p.endsWith(".yaml") || p.endsWith(".yml")) return dataTree(yamlLoad(text));
+        if (p.endsWith(".xml")) {
+          const dom = new DOMParser().parseFromString(text, "text/xml");
+          const fehler = dom.querySelector("parsererror");
+          if (fehler) throw new Error(fehler.textContent ?? "XML-Fehler");
+          return xmlTree(dom.documentElement);
+        }
+      } catch (e) {
+        const box = document.createElement("div");
+        const meldung = document.createElement("div");
+        meldung.className = "wiki-note-error";
+        meldung.textContent = String(e);
+        box.append(meldung, roh(text));
+        return box;
+      }
+      return roh(text);
+    };
+    cb.readFile(doc.id).then(
+      (text) => {
+        if (selected !== doc.id) return;
+        body.append(baum(text));
+        zeigeFundstellen(body);
+      },
+      (e) => {
+        body.append(roh(String(e)));
+      },
+    );
+    return body;
+  }
+
+  /// Diagramm-Ansicht einer `.drawio`-Datei: der gebündelte draw.io-Viewer
+  /// rendert das XML read-only (Zoom-Toolbar, Layer). Das Skript lädt beim
+  /// ersten Diagramm einmalig nach — es wiegt 2,6 MB und gehört nicht ins
+  /// Panel-Bundle.
+  let drawioViewer: Promise<void> | null = null;
+  function ladeDrawioViewer(): Promise<void> {
+    if (!drawioViewer) {
+      drawioViewer = new Promise((ok, nein) => {
+        const s = document.createElement("script");
+        s.src = drawioViewerUrl;
+        s.addEventListener("load", () => ok());
+        s.addEventListener("error", () => nein(new Error("draw.io-Viewer lädt nicht")));
+        document.head.append(s);
+      });
+    }
+    return drawioViewer;
+  }
+
+  /// Referenz eines eingebetteten Diagramms (relativ zur Notiz, `./`, `../`
+  /// oder `/` = Archiv-Wurzel) zum Archiv-relpath auflösen.
+  function drawioRelpath(docRel: string, ref: string): string {
+    const teile = ref.startsWith("/") ? [] : docRel.split("/").slice(0, -1);
+    for (const t of ref.split("/")) {
+      if (t === "." || t === "") continue;
+      if (t === "..") teile.pop();
+      else teile.push(t);
+    }
+    return teile.join("/");
+  }
+
+  /// Viewer anlegen und das Diagramm einmal einpassen: mit Zoom-Toolbar
+  /// unterdrückt der Viewer sein auto-fit (zoomEnabled), fitGraph holt genau
+  /// diesen Schritt nach — er übersetzt an die Zeichnungsgrenzen und skaliert
+  /// in die Containerbreite. Danach gelten die Zoom-Knöpfe normal.
+  ///
+  /// `fitGraph` allein rechnet nur die Breite (`graph.fit` läuft dort mit
+  /// ignoreHeight), ein hohes Diagramm stünde also über den Rand hinaus und
+  /// müsste gescrollt werden. Die Obergrenze `maxFitScale` erledigt die
+  /// Höhe: die Skala, bei der die Zeichnung gerade in die Fläche passt.
+  ///
+  /// Das gilt nur für die Diagramm-Ansicht mit ihrer festen Bühne (`buehne`).
+  /// Ein in eine Notiz eingebettetes Diagramm wächst umgekehrt mit seinem
+  /// Inhalt: Dort ist die Container-Höhe vor dem Zeichnen noch die des leeren
+  /// Platzhalters — als Deckel genommen, schrumpfte die Zeichnung auf nichts.
+  function zeigeDrawio(el: Element, buehne = false) {
+    type Graph = {
+      border: number;
+      container: HTMLElement;
+      view: { scale: number };
+      getGraphBounds(): { height: number };
+    };
+    type Viewer = {
+      graph?: Graph;
+      fitGraph?: (max?: number) => void;
+      addListener?: (ev: string, f: () => void) => void;
+    };
+    const gv = (
+      window as {
+        GraphViewer?: { createViewerForElement(e: Element, cb?: (v: Viewer) => void): void };
+      }
+    ).GraphViewer;
+    gv?.createViewerForElement(el, (v) => {
+      const einpassen = () => {
+        const g = v.graph;
+        if (!buehne || !g) {
+          v.fitGraph?.();
+          return;
+        }
+        const platz = g.container.clientHeight - 2 * g.border - 2;
+        const hoch = g.getGraphBounds().height / g.view.scale;
+        v.fitGraph?.(hoch > 0 && platz > 0 ? Math.min(1, platz / hoch) : undefined);
+        // Der Viewer stellt beim Einpassen auf `hidden` — danach ließe sich
+        // ein hineingezoomtes Diagramm nicht mehr verschieben.
+        g.container.style.overflow = "auto";
+      };
+      if (v.fitGraph) einpassen();
+      else v.addListener?.("render", einpassen);
+      // Fenstergröße geändert: neu einpassen, damit das Diagramm die Fläche
+      // ausfüllt, ohne über sie hinauszuragen.
+      if (buehne && typeof ResizeObserver === "function") {
+        let erste = true;
+        new ResizeObserver(() => {
+          if (erste) {
+            erste = false;
+            return;
+          }
+          einpassen();
+        }).observe(el);
+      }
+    });
+  }
+
+  /// Füllt `![](x.drawio)`-Platzhalter einer gerenderten Notiz mit dem
+  /// draw.io-Viewer; Doppelklick öffnet die Desktop-App. Lesefehler stehen
+  /// im Platzhalter statt still zu verschwinden.
+  function hydrateDrawio(body: HTMLElement, docRel: string) {
+    for (const span of body.querySelectorAll<HTMLElement>(".md-drawio")) {
+      const ref = span.dataset.drawio ?? "";
+      // Ressourcen liegen im versteckten Ordner der Notiz und stehen damit
+      // außerhalb des Archiv-Index — sie werden über den Pfad angesprochen.
+      const id = `path:${drawioRelpath(docRel, ref)}`;
+      Promise.all([cb.readFile(id), ladeDrawioViewer()]).then(
+        ([xml]) => {
+          if (drawioLeer(xml)) {
+            span.textContent = t("wiki.emptyDiagram");
+            if (cb.drawioAvailable()) {
+              span.title = t("wiki.editDrawio");
+              span.addEventListener("dblclick", () => cb.openDrawio(id));
+            }
+            return;
+          }
+          const el = document.createElement("div");
+          // auto-fit + max-width wie im offiziellen drawio-Embed: der Viewer
+          // skaliert in die verfügbare Breite und setzt am Ursprung an — ohne
+          // beides ragt ein breites oder weit vom Nullpunkt gezeichnetes
+          // Diagramm nach rechts hinaus bzw. wird abgeschnitten.
+          el.style.maxWidth = "100%";
+          el.setAttribute(
+            "data-mxgraph",
+            JSON.stringify({ xml, nav: true, resize: false, "auto-fit": true }),
+          );
+          span.replaceChildren(el);
+          span.classList.add("md-drawio-live");
+          zeigeDrawio(el);
+          if (cb.drawioAvailable()) {
+            span.title = t("wiki.editDrawio");
+            span.addEventListener("dblclick", () => cb.openDrawio(id));
+          }
+        },
+        (e) => {
+          span.textContent = `${ref}: ${e}`;
+        },
+      );
+    }
+  }
+
+  function drawioBody(doc: DocEntry): HTMLElement {
+    const body = document.createElement("div");
+    body.className = "wiki-note-body wiki-note-drawio";
+    Promise.all([cb.readFile(doc.id), ladeDrawioViewer()]).then(
+      ([xml]) => {
+        if (selected !== doc.id) return;
+        if (drawioLeer(xml)) {
+          body.textContent = t("wiki.emptyDiagram");
+          return;
+        }
+        const el = document.createElement("div");
+        el.style.maxWidth = "100%";
+        // Volle Fläche als Inline-Höhe: Der Viewer behandelt einen Container
+        // mit gesetzter Höhe als Bühne — er lässt sie stehen (statt sie auf
+        // die Diagrammhöhe zu ziehen) und zentriert die Zeichnung darin.
+        el.style.height = "100%";
+        // resize ausdrücklich false: fehlt der Schlüssel ganz, prüft der
+        // Viewer `0 != resize` (undefined → wahr) und schaltet resizeContainer
+        // ein — der Container wird dann auf Diagramm-Pixelbreite gesetzt,
+        // die Zeichnung springt an ihre gespeicherten Koordinaten und der
+        // Überstand wird rechts gekappt.
+        el.setAttribute(
+          "data-mxgraph",
+          JSON.stringify({ xml, nav: true, resize: false, "auto-fit": true, toolbar: "zoom layers" }),
+        );
+        body.append(el);
+        zeigeDrawio(el, true);
       },
       (e) => {
         body.textContent = String(e);
@@ -627,6 +1086,12 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     // HTML-Notizen: WYSIWYG auf ProseMirror, das Format bleibt HTML.
     if (doc.kind === "html") {
       let editor: { html(): string; destroy(): void } | null = null;
+      box.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return;
+        e.preventDefault();
+        editor?.destroy();
+        abortEdit();
+      });
       cb.readDoc(doc.id).then((text) => {
         if (selected !== doc.id || !editing) return;
         const ed = initHtmlEditor(text);
@@ -648,36 +1113,128 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     }
     const split = document.createElement("div");
     split.className = "wiki-edit-split";
-    const area = document.createElement("textarea");
-    area.className = "wiki-note-editor";
-    area.spellcheck = false;
     const preview = document.createElement("div");
     preview.className = "wiki-note-body wiki-edit-preview";
+    let editor: MdEditor | null = null;
     const draw = () => {
-      preview.innerHTML =
-        doc.kind === "html" ? area.value : renderMarkdown(area.value);
+      const text = editor?.value() ?? "";
+      preview.innerHTML = doc.kind === "html" ? text : renderMarkdown(text);
       linkWikiRefs(preview, followWikiLink);
+      hydrateDrawio(preview, doc.relpath);
     };
-    cb.readDoc(doc.id).then((text) => {
-      area.value = text;
-      draw();
-      area.focus();
-    }, fail);
-    area.addEventListener("input", draw);
     const save = () => {
-      cb.writeDoc(doc.id, area.value).then(() => {
+      cb.writeDoc(doc.id, editor?.value() ?? "").then(() => {
         editing = false;
         renderMain();
       }, fail);
     };
-    area.addEventListener("keydown", (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-        e.preventDefault();
-        save();
-      }
+    // Die Vorschau läuft mit: derselbe Anteil an der Scrollstrecke wie im
+    // Rohtext — Zeilen lassen sich nicht zuordnen, die Stelle im Text schon.
+    const mitlaufen = (anteil: number) => {
+      const platz = preview.scrollHeight - preview.clientHeight;
+      if (platz > 0) preview.scrollTop = anteil * platz;
+    };
+
+    // Diagramm einfügen: leere .drawio-Datei im Ressourcen-Ordner, Referenz an
+    // der Cursorstelle, dann direkt die Desktop-App zum Zeichnen.
+    const bar = document.createElement("div");
+    bar.className = "wiki-edit-toolbar";
+    const werkzeug = (label: string, titel: string, run: () => void) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "wiki-edit-tool";
+      b.textContent = label;
+      b.title = titel;
+      b.addEventListener("click", run);
+      return b;
+    };
+    const dia = werkzeug(t("wiki.newDiagram"), t("wiki.newDiagram"), () => {
+      openForm(t("wiki.newDiagram"), t("wiki.docName"), "", (v) => {
+        void cb.actions.createDrawio(doc.id, v).then((rel) => {
+          // Das Diagramm liegt im Ressourcen-Ordner der Notiz; der Verweis
+          // steht relativ zu ihr (`./.<notiz>.res/<name>.drawio`).
+          const dir = doc.relpath.split("/").slice(0, -1).join("/");
+          const ref_ = dir && rel.startsWith(`${dir}/`) ? rel.slice(dir.length + 1) : rel;
+          editor?.insert(`![](./${ref_})`);
+          draw();
+          // Die Datei liegt jetzt auf der Platte — der Verweis darauf gehört
+          // dorthin, nicht in einen Editor, den ein Abbrechen wegwirft.
+          cb.writeDoc(doc.id, editor?.value() ?? "").catch(fail);
+          if (cb.drawioAvailable()) cb.openDrawio(`path:${rel}`);
+        });
+      });
     });
-    split.append(area, preview);
-    box.append(err, split);
+    if (!cb.drawioAvailable()) dia.title = t("wiki.drawioMissing");
+    const tab = werkzeug("⊞", t("html.table"), () =>
+      openTableForm(bar, ({ spalten, zeilen, kopf }) => {
+        editor?.insert(mdTabelle(spalten, zeilen, kopf));
+        draw();
+      }),
+    );
+    bar.append(dia, tab);
+
+    cb.readDoc(doc.id).then((text) => {
+      if (selected !== doc.id || !editing) return;
+      editor = initMdEditor({
+        text,
+        // Aus der Suche gekommen: dieselben Wörter markieren und zu der
+        // Stelle springen, die beim Lesen im Bild stand.
+        fundstellen: fundstellen.length
+          ? { woerter: fundstellen, nummer: sichtbareFundstelle() }
+          : undefined,
+        onChange: draw,
+        onSave: save,
+        onCancel: abortEdit,
+        onScroll: mitlaufen,
+      });
+      split.prepend(editor.el);
+      draw();
+      editor.focus();
+    }, fail);
+    previewRedraw = draw;
+
+    split.append(preview);
+    box.append(err, bar, split);
+    return { el: box, save };
+  }
+
+  /// Editor für Rohdaten-Dateien (Klartext, JSON, YAML, XML): eine Fläche
+  /// ohne Vorschau — das Format ist die Anzeige. Gespeichert wird die Datei,
+  /// wie sie dasteht, ohne Frontmatter.
+  function textEditor(doc: DocEntry, sprache: Sprache): { el: HTMLElement; save(): void } {
+    const box = document.createElement("div");
+    box.className = "wiki-note-edit";
+    const err = document.createElement("div");
+    err.className = "wiki-note-error";
+    err.hidden = true;
+    const fail = (e: unknown) => {
+      err.hidden = false;
+      err.textContent = String(e);
+    };
+    let editor: MdEditor | null = null;
+    const save = () => {
+      cb.writeFile(doc.id, editor?.value() ?? "").then(() => {
+        editing = false;
+        renderMain();
+      }, fail);
+    };
+    cb.readFile(doc.id).then((text) => {
+      if (selected !== doc.id || !editing) return;
+      editor = initMdEditor({
+        text,
+        sprache,
+        fundstellen: fundstellen.length
+          ? { woerter: fundstellen, nummer: sichtbareFundstelle() }
+          : undefined,
+        onChange: () => {},
+        onSave: save,
+        onCancel: abortEdit,
+        onScroll: () => {},
+      });
+      box.append(editor.el);
+      editor.focus();
+    }, fail);
+    box.append(err);
     return { el: box, save };
   }
 
@@ -690,11 +1247,14 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     const cancel = document.createElement("button");
     cancel.className = "wiki-form-cancel";
     cancel.textContent = t("wiki.cancel");
-    cancel.addEventListener("click", () => {
-      editing = false;
-      renderMain();
-    });
+    cancel.addEventListener("click", abortEdit);
     return [ok, cancel];
+  }
+
+  /// Bearbeiten verwerfen — dasselbe wie Abbrechen (Regel 4.4).
+  function abortEdit() {
+    editing = false;
+    renderMain();
   }
 
   function metaParts(doc: DocEntry): string[] {
@@ -706,9 +1266,34 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   }
 
   function docActions(doc: DocEntry): HTMLElement[] {
-    // Bücher werden gelesen und gelöscht, nicht bearbeitet.
-    if (doc.kind === "epub") {
-      return [deleteAction(t("wiki.deleteDoc"), () => cb.actions.remove(doc.id))];
+    // Bücher und sonstige Dateien werden angezeigt und gelöscht, nicht
+    // bearbeitet. Diagramme bearbeitet die draw.io-Desktop-App, wenn sie
+    // installiert ist.
+    if (doc.kind === "epub" || doc.kind === "file") {
+      const acts: HTMLElement[] = [];
+      if (istDrawio(doc) && cb.drawioAvailable()) {
+        const edit = document.createElement("button");
+        edit.className = "panel-btn wiki-drawio-edit";
+        edit.title = t("wiki.editDrawio");
+        edit.textContent = "✎";
+        edit.addEventListener("click", () => cb.openDrawio(doc.id));
+        acts.push(edit);
+      }
+      // Textdateien (Klartext, JSON, YAML, XML) bearbeitet der Editor mit
+      // der Grammatik ihrer Endung.
+      if (spracheZu(doc.relpath)) {
+        const edit = document.createElement("button");
+        edit.className = "panel-btn";
+        edit.title = t("wiki.editDoc");
+        edit.textContent = "✎";
+        edit.addEventListener("click", () => {
+          editing = true;
+          renderMain();
+        });
+        acts.push(edit);
+      }
+      acts.push(deleteAction(t("wiki.deleteDoc"), () => cb.actions.remove(doc.id)));
+      return acts;
     }
     const edit = document.createElement("button");
     edit.className = "panel-btn";
@@ -723,36 +1308,128 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
 
   /// Kindzeile im Dokument-Abschnitt: Titel links, Anlage-/Änderungsdatum
   /// rechts; Knoten ohne Inhaltsdatei zeigen nur den Titel.
-  function childRow(title: string, doc: DocEntry | null, onOpen: () => void): HTMLElement {
+  function childRow(
+    title: string,
+    doc: DocEntry | null,
+    onOpen: () => void,
+    folder: { path: string; leer: boolean } | null = null,
+  ): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "wiki-doc-row";
     const row = document.createElement("div");
-    row.className = "wiki-doc";
+    row.className = folder ? "wiki-doc" : "wiki-doc wiki-doc-entry";
     const line = document.createElement("div");
     line.className = "wiki-doc-line";
+    // Typ-Symbol groß über beide Zeilen; rechts davon die Textspalte:
+    // Titel, darunter die Beschreibung.
+    const textcol = document.createElement("div");
+    textcol.className = "wiki-doc-text";
     const head = document.createElement("div");
     head.className = "wiki-doc-title";
     head.textContent = title;
-    line.append(head);
+    textcol.append(head);
+    if (doc?.description) {
+      const desc = document.createElement("div");
+      desc.className = "wiki-doc-desc";
+      desc.textContent = doc.description;
+      textcol.append(desc);
+    }
+    line.append(folder || !doc ? typeIcon("node") : docIcon(doc), textcol);
     if (doc) {
+      // Zweizeilig rechts: erstellt über geändert; der volle Zeitstempel
+      // der Änderung steht im Hover.
       const dates = document.createElement("div");
       dates.className = "wiki-doc-date";
-      const parts = [];
-      if (doc.date) parts.push(t("wiki.createdAt", { date: doc.date }));
-      parts.push(t("wiki.changedAt", { date: doc.modified }));
-      dates.textContent = parts.join(" · ");
+      if (doc.date) {
+        const created = document.createElement("div");
+        created.textContent = t("wiki.createdAt", { date: doc.date });
+        dates.append(created);
+      }
+      const changed = document.createElement("div");
+      changed.textContent = t("wiki.changedAt", { date: doc.modified.slice(0, 10) });
+      changed.title = doc.modified.replace("T", " ").replace("Z", " UTC");
+      dates.append(changed);
       line.append(dates);
     }
     row.append(line);
+    // Aktionen HINTER der Kachel (außerhalb, immer sichtbar): im
+    // Dateimanager zeigen und Löschen — für Dokumente wie für Ordner.
+    const acts = document.createElement("div");
+    acts.className = "wiki-row-actions";
+    const rel = folder ? folder.path : doc?.relpath;
+    if (rel) {
+      const reveal = document.createElement("button");
+      reveal.className = "panel-btn";
+      reveal.title = t("wiki.reveal");
+      reveal.innerHTML = `<svg viewBox="0 0 16 16"><path d="M6.4 3.6H3.6a1.1 1.1 0 0 0-1.1 1.1v7.7a1.1 1.1 0 0 0 1.1 1.1h7.7a1.1 1.1 0 0 0 1.1-1.1V9.6"/><path d="M9.6 2.5h3.9v3.9"/><path d="M13.3 2.7 7.9 8.1"/></svg>`;
+      reveal.addEventListener("click", (e) => {
+        e.stopPropagation();
+        cb.actions.reveal(`${current!.home.replace(/\/+$/, "")}/${rel}`);
+      });
+      acts.append(reveal);
+    }
+    const del = folder
+      ? deleteAction(t("wiki.deleteFolder"), () =>
+          // Ein voller Ordner fragt nach — remove_dir_all nimmt den ganzen
+          // Teilbaum mit; ein leerer löscht direkt.
+          folder.leer
+            ? cb.actions.removeFolder(folder.path)
+            : confirmBox(t("wiki.confirmDeleteFolder", { name: title }), () =>
+                cb.actions.removeFolder(folder.path),
+              ),
+        )
+      : doc
+        ? deleteAction(t("wiki.deleteDoc"), () => cb.actions.remove(doc.id))
+        : null;
+    if (del) {
+      del.addEventListener("click", (e) => e.stopPropagation());
+      acts.append(del);
+    }
+    wrap.append(row, acts);
     row.addEventListener("click", onOpen);
-    return row;
+    // Das Kontextmenü der Dokument-Zeile (Bearbeiten/Löschen) — vorher am
+    // Baum-Blatt, jetzt an der Übersichts-Zeile.
+    if (doc && !folder) {
+      row.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const edit = {
+          label: t("wiki.editDoc"),
+          run: () => {
+            select(doc.id);
+            editing = true;
+            renderMain();
+          },
+        };
+        const remove = { label: t("wiki.deleteDoc"), run: () => cb.actions.remove(doc.id) };
+        // Bücher und sonstige Dateien werden angezeigt, nicht bearbeitet.
+        openMenu(
+          e.clientX,
+          e.clientY,
+          doc.kind === "epub" || doc.kind === "file" ? [remove] : [edit, remove],
+        );
+      });
+    }
+    return wrap;
   }
 
   function renderMain() {
     const p = current!;
     const main = container.querySelector<HTMLElement>(".wiki-main")!;
     main.textContent = "";
+    // Der alte Editor ist mit dem Inhalt weg; einen neuen setzt noteEditor.
+    previewRedraw = null;
     // Der Buch-Viewer füllt die Fläche und blättert selbst; die Notiz-Ansicht
     // scrollt. Beides im selben Bereich, also die Umschaltung hier.
     main.classList.remove("epub-mode");
+    // Die Knopfzeile bleibt fest oben stehen; gescrollt wird der Inhalt —
+    // auch horizontal, wenn ein Diagramm breiter ist als das Fenster.
+    const scroller = (...els: HTMLElement[]) => {
+      const s = document.createElement("div");
+      s.className = "wiki-note-scroll";
+      s.append(...els);
+      return s;
+    };
 
     if (isLeaf(selected)) {
       const doc = findDoc(selected);
@@ -762,45 +1439,155 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
         main.append(noteHead(doc.title, metaParts(doc), docActions(doc)), epubBody(doc));
         return;
       }
+      if (doc.kind === "file") {
+        // Das Diagramm bekommt die Restfläche als eigene Bühne: es wird beim
+        // Öffnen ganz hineingezoomt, also scrollt hier nichts.
+        if (istDrawio(doc)) {
+          main.append(noteHead(doc.title, metaParts(doc), docActions(doc)), drawioBody(doc));
+          return;
+        }
+        const sprache = spracheZu(doc.relpath);
+        if (editing && sprache) {
+          const ed = textEditor(doc, sprache);
+          main.append(noteHead(doc.title, [], editActions(ed.save)), scroller(ed.el));
+          return;
+        }
+        main.append(noteHead(doc.title, metaParts(doc), docActions(doc)), scroller(fileBody(doc)));
+        return;
+      }
       if (editing) {
         const ed = noteEditor(doc);
-        main.append(noteHead(doc.title, [], editActions(ed.save)), ed.el);
+        main.append(noteHead(doc.title, [], editActions(ed.save)), scroller(ed.el));
         return;
       }
       const head = noteHead(doc.title, metaParts(doc), docActions(doc));
-      main.append(head, noteBody(doc));
+      main.append(head, scroller(noteBody(doc)));
       return;
     }
 
     const node = nodeById(selected);
     if (!node) return;
-    const title = node.content?.title ?? t("wiki.archive");
+    // Ohne eigene Notiz trägt der Knoten keinen Titel — der Ordnername steht
+    // im Baum, ein gesetztes Wort in der Titelzeile wäre nur Füllung.
+    const title = node.content?.title ?? "";
     const children = [...node.children.keys()].length + node.docs.length;
     const meta: string[] = node.content ? metaParts(node.content) : [];
 
+    // Anlegen mit Auswahl: Ordner, Markdown-Notiz, HTML-Notiz, Dateien —
+    // dieselben Wege wie im Kontextmenü des Baums, nur erreichbar ohne
+    // rechte Maustaste.
     const add = document.createElement("button");
     add.className = "wiki-add";
-    add.title = t("wiki.newDoc");
+    add.title = t("wiki.newEntry");
     add.textContent = "+";
-    add.addEventListener("click", () => newDocForm(selected));
+    add.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const r = add.getBoundingClientRect();
+      openMenu(r.left, r.bottom + 4, anlegeMenue(selected));
+    });
     const actions: HTMLElement[] = node.content
       ? [add, ...docActions(node.content)]
       : [add];
     if (editing && node.content) {
       const ed = noteEditor(node.content);
-      main.append(noteHead(title, [], editActions(ed.save)), ed.el);
+      main.append(noteHead(title, [], editActions(ed.save)), scroller(ed.el));
       return;
     }
-    const head = noteHead(title, meta, actions);
-    main.append(head);
+    // Suchfeld (filtert nur die angezeigte Liste) und Sortier-Widget der
+    // Datei-Übersicht — beide in der Titelzeile, keine Spaltenfilter.
+    const filter = document.createElement("input");
+    filter.className = "wiki-filter";
+    filter.type = "search";
+    filter.title = t("wiki.filterDocs");
+    filter.setAttribute("aria-label", t("wiki.filterDocs"));
+    filter.value = docFilter;
+    // Sortier-Knopf: zeigt die geltende erste Stufe im Klartext, öffnet das
+    // Rangfolge-Menü.
+    const sort = document.createElement("button");
+    sort.className = "wiki-sort";
+    const sortLabel = () => {
+      const [feld, richtung] = sortOrder[0];
+      sort.textContent = `${t(SORTFELDER[feld])} ${richtung === "asc" ? "↑" : "↓"}`;
+    };
+    sortLabel();
+
+    const docOrder = (a: DocEntry, b: DocEntry) => {
+      for (const [feld, richtung] of sortOrder) {
+        const wert = (d: DocEntry) =>
+          feld === "name"
+            ? d.title.toLowerCase()
+            : feld === "changed"
+              ? d.modified
+              : (d.date ?? d.modified);
+        const cmp = wert(a).localeCompare(wert(b));
+        if (cmp) return richtung === "asc" ? cmp : -cmp;
+      }
+      return 0;
+    };
+
+    const buildList = () => {
+      const list = document.createElement("div");
+      list.className = "wiki-note-children";
+      const q = docFilter.trim().toLowerCase();
+      const ordner = [...node.children]
+        .filter(
+          ([name, child]) => !q || (child.content?.title ?? name).toLowerCase().includes(q),
+        )
+        .sort((a, b) => a[0].localeCompare(b[0]));
+      const docs = [...node.docs].filter((d) => !q || d.title.toLowerCase().includes(q)).sort(docOrder);
+      const caption = document.createElement("div");
+      caption.className = "wiki-children-caption";
+      const n = ordner.length + docs.length;
+      caption.textContent = t(n === 1 ? "wiki.docOne" : "wiki.docMany", { count: n });
+      list.append(caption);
+      for (const [name, child] of ordner) {
+        const childId = child.content?.id ?? "";
+        list.append(
+          childRow(child.content?.title ?? name, child.content ?? null, () => select(childId), {
+            path: child.path,
+            leer: child.docs.length === 0 && child.children.size === 0,
+          }),
+        );
+      }
+      for (const doc of docs) {
+        list.append(childRow(doc.title, doc, () => select(doc.id)));
+      }
+      return list;
+    };
+    let listEl: HTMLElement | null = null;
+    const refresh = () => {
+      if (!listEl) return;
+      const neu = buildList();
+      listEl.replaceWith(neu);
+      listEl = neu;
+    };
+    filter.addEventListener("input", () => {
+      docFilter = filter.value;
+      refresh();
+    });
+    sort.addEventListener("click", () => {
+      const r = sort.getBoundingClientRect();
+      openSortMenu(r.left, r.bottom + 4, () => {
+        sortLabel();
+        refresh();
+      });
+    });
+
+    // Suche und Sortierung gehören zusammen; abgesetzt wird nur der Block
+    // der Aktions-Knöpfe dahinter.
+    const trenner = document.createElement("span");
+    trenner.className = "wiki-head-sep";
+    const head = noteHead(title, meta, [filter, sort, trenner, ...actions]);
+    const scroll = scroller();
+    main.append(head, scroll);
     if (node.content) {
-      main.append(noteBody(node.content));
+      scroll.append(noteBody(node.content));
     } else {
       // Jede Ordner-Notiz trägt von Haus aus Text — im Default ihren Namen.
       const body = document.createElement("div");
       body.className = "wiki-note-body default";
       body.textContent = title;
-      main.append(body);
+      scroll.append(body);
     }
 
     if (children === 0 && !node.content) {
@@ -810,41 +1597,41 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
       line.textContent = p.total === 0 ? t("wiki.emptyArchive") : t("wiki.emptyFolder");
       empty.append(line);
       if (p.total === 0) empty.append(t("wiki.emptyHint"));
-      main.append(empty);
+      scroll.append(empty);
       return;
     }
-    const list = document.createElement("div");
-    list.className = "wiki-note-children";
-    const caption = document.createElement("div");
-    caption.className = "wiki-children-caption";
-    caption.textContent = t(children === 1 ? "wiki.docOne" : "wiki.docMany", {
-      count: children,
-    });
-    list.append(caption);
-    for (const [name, child] of [...node.children].sort((a, b) => a[0].localeCompare(b[0]))) {
-      const childId = child.content?.id ?? "";
-      list.append(
-        childRow(child.content?.title ?? name, child.content ?? null, () =>
-          select(childId),
-        ),
-      );
-    }
-    for (const doc of [...node.docs].sort((a, b) => a.title.localeCompare(b.title))) {
-      list.append(childRow(doc.title, doc, () => select(doc.id)));
-    }
-    main.append(list);
+    listEl = buildList();
+    scroll.append(listEl);
   }
 
   function select(target: string, remember = true) {
     if (remember && target !== selected) history.push(selected);
-    editing = false;
-    selected = target;
-    // Vorfahren aufklappen, sonst bleibt die Hervorhebung unsichtbar.
-    for (let p = parentOf(target); p?.content; p = parentOf(p.content.id)) {
-      closed.delete(p.content.id);
+    // Fundstellen gelten für ihre Notiz; eine andere Auswahl räumt sie weg.
+    if (target !== fundstellenId) {
+      fundstellen = [];
+      marken = [];
     }
+    editing = false;
+    docFilter = "";
+    selected = target;
     if (current) render();
   }
+
+  // Breite der Baum-Spalte; per Zieh-Griff verstellbar, gilt für die
+  // Lebensdauer des Fensters.
+  let treeWidth = 230;
+
+  // Suchfeld und Sortierung der Datei-Übersicht; der Filter gilt je Auswahl,
+  // die Sortierung für die Lebensdauer des Fensters.
+  let docFilter = "";
+  /// Rangfolge der Sortierung: erste Stufe zuerst, bei Gleichstand
+  /// entscheidet die nächste. Alle Felder sind immer enthalten — die
+  /// Reihenfolge ist die Aussage, nicht eine Auswahl.
+  let sortOrder: [SortFeld, "asc" | "desc"][] = [
+    ["name", "asc"],
+    ["changed", "desc"],
+    ["created", "desc"],
+  ];
 
   function render() {
     container.textContent = "";
@@ -852,7 +1639,26 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     layout.className = "wiki-layout";
     const main = document.createElement("div");
     main.className = "wiki-main";
-    layout.append(renderTree(), main);
+    const tree = renderTree();
+    tree.style.flexBasis = `${treeWidth}px`;
+    const grip = document.createElement("div");
+    grip.className = "wiki-splitter";
+    grip.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const start = treeWidth;
+      const move = (ev: MouseEvent) => {
+        treeWidth = Math.min(560, Math.max(140, start + ev.clientX - startX));
+        tree.style.flexBasis = `${treeWidth}px`;
+      };
+      const up = () => {
+        window.removeEventListener("mousemove", move);
+        window.removeEventListener("mouseup", up);
+      };
+      window.addEventListener("mousemove", move);
+      window.addEventListener("mouseup", up);
+    });
+    layout.append(tree, grip, main);
     container.append(layout);
     renderMain();
   }
@@ -869,9 +1675,10 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   let loaded = false;
   return {
     set(text: string) {
-      container.textContent = "";
       loaded = !!text.trim();
+      // Geleert wird beim Neuzeichnen (render) — hier nur der leere Puffer.
       if (!loaded) {
+        container.textContent = "";
         current = null;
         if (cb.autoStart && !requested) {
           requested = true;
@@ -880,18 +1687,41 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
         return;
       }
       current = JSON.parse(text);
+      const alt = tree;
       tree = buildTree(current!);
-      // Vorgemerkte Auswahl (Suchtreffer-Sprung) schlägt die gemerkte.
+      // Vorgemerkte Auswahl (Suchtreffer-Sprung) schlägt die gemerkte; die
+      // Wörter des Treffers markiert die Notiz, sobald ihr Text da ist.
       const pending = cb.takePending?.();
       if (pending && findDoc(pending)) {
+        fundstellen = cb.takeMarks?.() ?? [];
+        fundstellenId = pending;
         select(pending);
         return;
       }
-      // Die gewählte Notiz kann nach Umbenennen/Löschen weg sein — dann
-      // zurück zur Wurzel.
+      // Eine laufende Bearbeitung bleibt stehen: Neuzeichnen baute den Editor
+      // neu auf und lädt den Text von der Platte — der eben eingefügte
+      // Diagramm-Verweis wäre weg, sobald draw.io speichert und der
+      // Archiv-Watcher die Übersicht nachschiebt. Die Vorschau wird trotzdem
+      // frisch gezeichnet, damit das eben gezeichnete Diagramm erscheint.
+      if (editing) {
+        previewRedraw?.();
+        return;
+      }
+      // Die gewählte Notiz kann nach Umbenennen/Löschen weg sein — dann eine
+      // Ebene hinauf: der tiefste Vorfahre aus dem alten Baum, den es noch
+      // gibt; zuletzt die Wurzel.
       const exists = !!findDoc(selected) || !!nodeById(selected);
       if (selected && !exists) {
-        selected = "";
+        const kette = ancestors(selected, alt) ?? [];
+        let ziel = "";
+        for (let i = kette.length - 1; i >= 0; i--) {
+          const n = nodeByPath(kette[i].path);
+          if (n) {
+            ziel = n.content?.id ?? "";
+            break;
+          }
+        }
+        selected = ziel;
       }
       render();
       applyPendingEdit();

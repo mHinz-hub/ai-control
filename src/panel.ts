@@ -3,7 +3,6 @@ import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 import { wirePanel } from "./panel-wiring";
 import { flash, panelToast } from "./tiles";
 import { initArchiveForm } from "./archive-form";
@@ -38,6 +37,14 @@ window.addEventListener("unhandledrejection", (e) =>
 // Terminal-Fenster; macOS behält die native Deko.
 const isMac = /Mac|Macintosh/.test(navigator.userAgent);
 document.documentElement.dataset.platform = isMac ? "mac" : "other";
+// Seite der Fensterknöpfe folgt dem Desktop (GNOME/Cinnamon, KDE, XFCE). Das
+// Flag steuert die eigene Knopfgruppe; macOS zeichnet die Ampel selbst und
+// reserviert ihr über data-platform Platz — dort bleibt es ungesetzt.
+if (!isMac) {
+  void invoke<boolean>("window_buttons_left").then((links) => {
+    if (links) document.documentElement.dataset.winbtns = "left";
+  });
+}
 if (!isMac) {
   document
     .getElementById("win-min")!
@@ -60,41 +67,36 @@ document.querySelector(".panel-topbar")!.addEventListener("dblclick", (e) => {
   }
 });
 
-// Fenstergeometrie merken und beim nächsten Öffnen wiederherstellen; unter
-// Wayland vergibt der Compositor die Position, dann greift nur die Größe.
-const GEO_KEY = `panel-geometry:${project}`;
-const savedGeo = localStorage.getItem(GEO_KEY);
-if (savedGeo) {
-  const g = JSON.parse(savedGeo);
-  await win.setSize(new PhysicalSize(g.w, g.h));
-  await win.setPosition(new PhysicalPosition(g.x, g.y));
-}
-let geoTimer: number | undefined;
-const saveGeo = () => {
-  clearTimeout(geoTimer);
-  geoTimer = window.setTimeout(async () => {
-    const pos = await win.outerPosition();
-    const size = await win.innerSize();
-    localStorage.setItem(
-      GEO_KEY,
-      JSON.stringify({ x: pos.x, y: pos.y, w: size.width, h: size.height }),
-    );
-  }, 300);
-};
-await win.onMoved(saveGeo);
-await win.onResized(saveGeo);
+// Ein früherer Geometrie-Merker (panel-geometry:<projekt> im localStorage)
+// ist ersatzlos raus: Er hat jede Fenstergeometrie ungeprüft konserviert und
+// beim nächsten Öffnen wieder eingespielt — bei mehreren Monitoren mit
+// verheerenden Folgen. Der Altbestand wird hier ausgeräumt, damit er nie
+// wieder greift; die Öffnungsgröße kommt fest aus dem Rust-Fensterbau.
+localStorage.removeItem(`panel-geometry:${project}`);
 
 // Farben ans Theme koppeln — derselbe Look wie das angedockte Panel im
 // Terminal-Fenster (die CSS-Defaults sind Mocha).
 interface Project {
   id: string;
   name: string;
-  terminal: { theme: string | null };
+  terminal: { theme: string | null; icon: string | null; title: string | null };
 }
 const projects = await invoke<Project[]>("list_projects");
-const picked =
-  THEMES[projects.find((p) => p.id === project)?.terminal.theme ?? "mocha"];
+const cfg = projects.find((p) => p.id === project);
+const picked = THEMES[cfg?.terminal.theme ?? "mocha"];
 applyTheme(picked);
+
+// Kopfzeile wie im Terminal-Fenster: Projekt-Icon und Titel links.
+document.getElementById("project-name")!.textContent =
+  cfg?.terminal.title ?? cfg?.name ?? project;
+if (cfg?.terminal.icon) {
+  const data = await invoke<string | null>("project_icon", { project });
+  if (data) {
+    const img = document.getElementById("project-icon") as HTMLImageElement;
+    img.src = data;
+    img.hidden = false;
+  }
+}
 // Fensterhintergrund des Panel-Fensters ist die Kopf-Fläche, nicht das
 // Terminal-Dunkel.
 document.documentElement.style.background = picked.header;

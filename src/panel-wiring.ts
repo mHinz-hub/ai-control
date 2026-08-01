@@ -73,6 +73,8 @@ export async function wirePanel(
   const view = initPanelView({
     content: document.getElementById("panel-content")!,
     copyBtn: document.getElementById("panel-copy")!,
+    copyHtmlBtn: document.getElementById("panel-copy-html")!,
+    printBtn: document.getElementById("panel-print")!,
     modeBtn: document.getElementById("panel-mode")!,
     titleEl,
     editBtn: document.getElementById("panel-title-edit")!,
@@ -92,14 +94,17 @@ export async function wirePanel(
   /// Tabs mit eigener Ansicht in DIESER Fläche (Öffner-Knöpfe zählen nicht).
   const activeTabs: typeof tabs = [];
   let anchor = document.getElementById("panel-content")!;
-  for (const tab of tabs) {
+  for (const [i, tab] of tabs.entries()) {
     const btn = document.createElement("button");
     btn.className = "panel-btn";
     btn.dataset.mode = tab.mode;
     btn.textContent = t(tab.labelKey);
     btn.title = t(tab.titleKey);
     tabsEl.append(btn);
-    if (tab.sepAfter) {
+    // Der Trenner steht zwischen zwei Gruppen — hinter dem letzten Tab
+    // trennt er nichts und entfällt (im Archiv-Fenster gibt es nur die
+    // Archiv-Tabs).
+    if (tab.sepAfter && i < tabs.length - 1) {
       const sep = document.createElement("span");
       sep.className = "tab-sep";
       tabsEl.append(sep);
@@ -128,6 +133,12 @@ export async function wirePanel(
         : undefined,
     });
   }
+  // Im eigenen Fenster gibt es keinen Entwurf: Die Kopfzeile darunter trüge
+  // nur den Tab-Namen, der schon in der Tab-Leiste steht.
+  if (standalone) {
+    document.querySelector<HTMLElement>(".panel-head")!.hidden = true;
+  }
+
   const mode = initPanelMode({
     tabs: modeTabs,
     draftEls: [

@@ -20,6 +20,7 @@
     "allow-git-repos",
     "allow-git-diff",
     "allow-git-push-check",
-    "allow-git-commit"
+    "allow-git-commit",
+    "allow-window-buttons-left"
   ]
 }

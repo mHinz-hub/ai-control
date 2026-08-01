@@ -8,7 +8,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::domain::archive::{parse_frontmatter, parse_tag_list, slugify, strip_stamp};
+use crate::domain::archive::{
+  parse_frontmatter, parse_tag_list, slugify, strip_frontmatter, strip_stamp,
+};
 
 #[derive(serde::Serialize, Clone)]
 pub(crate) struct Doc {
@@ -97,12 +99,15 @@ fn walk(home: &Path, dir: &Path, docs: &mut Vec<(Doc, String)>) -> Result<(), St
       docs.push(read_doc(home, &path)?);
     } else if fname.ends_with(".epub") {
       docs.push(read_book(home, &path)?);
+    } else {
+      docs.push(read_file_node(home, &path)?);
     }
   }
   Ok(())
 }
 
-/// Letzte Änderung als `YYYY-MM-DD`.
+/// Letzte Änderung als voller ISO-Zeitstempel (`YYYY-MM-DDTHH:MM:SSZ`) —
+/// die Anzeige kürzt aufs Datum, sortiert und gehovert wird sekundengenau.
 fn modified(path: &Path) -> Result<String, String> {
   let mtime = fs::metadata(path)
     .and_then(|m| m.modified())
@@ -110,7 +115,7 @@ fn modified(path: &Path) -> Result<String, String> {
     .duration_since(std::time::UNIX_EPOCH)
     .map_err(|e| e.to_string())?
     .as_secs();
-  Ok(crate::domain::archive::utc_stamp(mtime).1[..10].to_string())
+  Ok(crate::domain::archive::utc_stamp(mtime).1)
 }
 
 /// Ein Buch (`.epub`) im Archiv: Eintrag im Baum, kein Notiz-Inhalt. Seine
@@ -140,6 +145,54 @@ fn read_book(home: &Path, path: &Path) -> Result<(Doc, String), String> {
     backlinks: Vec::new(),
   };
   Ok((doc, String::new()))
+}
+
+/// Endungen, deren Inhalt Text ist und damit in die Volltextsuche gehört.
+/// Alles andere (Bilder, Archive, ePub, Diagramme) bleibt draußen: Bytes in
+/// einem Wortindex finden nichts und kosten bei jedem Suchlauf Speicher.
+const TEXT_ENDUNGEN: &[&str] = &[
+  "txt", "text", "log", "json", "yaml", "yml", "xml", "csv", "toml", "ini", "conf", "cfg",
+  "sh", "bash", "py", "rs", "ts", "js", "css", "sql", "env", "gitignore",
+];
+
+/// Rohtext einer sonstigen Datei für den Suchindex — leer, wenn die Endung
+/// nicht für Text steht oder der Inhalt kein UTF-8 ist (dann ist es trotz
+/// Endung keine Textdatei).
+fn text_inhalt(path: &Path) -> Result<String, String> {
+  let ext = path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
+  if !TEXT_ENDUNGEN.contains(&ext.as_str()) {
+    return Ok(String::new());
+  }
+  let bytes = fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+  Ok(String::from_utf8(bytes).unwrap_or_default())
+}
+
+/// Eine sonstige Datei im Archiv (JSON, Log, Skript …): Eintrag im Baum nach
+/// dem Muster der Bücher — die Identität ist der Pfad, der Titel der volle
+/// Dateiname samt Endung. Kein Frontmatter, kein Notizmodell; den Inhalt
+/// zeigt die Rohtext-Ansicht, und bei Textformaten geht er in die Suche.
+fn read_file_node(home: &Path, path: &Path) -> Result<(Doc, String), String> {
+  let relpath = path
+    .strip_prefix(home)
+    .map_err(|e| format!("{}: {e}", path.display()))?
+    .display()
+    .to_string();
+  let fname = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+  let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+  let doc = Doc {
+    id: format!("file:{relpath}"),
+    relpath,
+    kind: "file",
+    title: fname,
+    name: strip_stamp(&stem).to_string(),
+    description: None,
+    tags: Vec::new(),
+    created: None,
+    modified: modified(path)?,
+    links: Vec::new(),
+    backlinks: Vec::new(),
+  };
+  Ok((doc, text_inhalt(path)?))
 }
 
 fn read_doc(home: &Path, path: &Path) -> Result<(Doc, String), String> {
@@ -177,10 +230,13 @@ fn read_doc(home: &Path, path: &Path) -> Result<(Doc, String), String> {
     kind,
     name,
   };
+  // Der Rumpf ist, was die Ansicht zeigt: HTML ohne Markup, Markdown ohne
+  // Frontmatter. Sonst gälte ein Treffer im Titel als Text-Treffer, und die
+  // Markierung im geöffneten Dokument liefe ins Leere.
   let indexed = if html {
     crate::domain::archive_html::strip_tags(&text)
   } else {
-    text
+    strip_frontmatter(&text).to_string()
   };
   Ok((doc, indexed))
 }
@@ -387,6 +443,11 @@ fn doc_entry(doc: &Doc) -> WikiDocEntry {
 
 /// Löst eine technische ID auf den aktuellen relpath auf.
 pub(crate) fn resolve_id(home: &Path, id: &str) -> Result<String, String> {
+  // Eine leere ID fände sonst das erste Dokument, dem noch keine ID ins
+  // Frontmatter geschrieben wurde — ein beliebiges statt des gemeinten.
+  if id.is_empty() {
+    return Err("leere Notiz-ID".into());
+  }
   scan_archive(home)?
     .into_iter()
     .find(|d| d.id == id)
@@ -467,6 +528,18 @@ mod tests {
     assert_eq!(adr.tags, vec!["adr", "infra"]);
     assert_eq!(adr.links, vec!["notiz-deploy"]);
     assert_eq!(docs[1].relpath, "konzepte/2026-07-19_1005-notiz-deploy.md");
+  }
+
+  #[test]
+  fn sonstige_datei_wird_datei_knoten() {
+    let home = archiv();
+    write(&home, "konzepte/daten.json", "{\"a\": 1}");
+    let docs = scan_archive(&home).unwrap();
+    let datei = docs.iter().find(|d| d.kind == "file").unwrap();
+    assert_eq!(datei.id, "file:konzepte/daten.json");
+    assert_eq!(datei.title, "daten.json");
+    assert_eq!(datei.relpath, "konzepte/daten.json");
+    assert!(datei.tags.is_empty());
   }
 
   #[test]

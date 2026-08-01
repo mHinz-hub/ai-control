@@ -91,8 +91,7 @@ pub(crate) fn replace_body(text: &str, html: &str) -> Result<String, String> {
 
 /// Reiner Text einer HTML-Notiz — Grundlage für den Suchindex.
 pub(crate) fn strip_tags(text: &str) -> String {
-  let mut out = String::new();
-  let mut rest = body(text);
+  let rest = body(text);
   // Skript- und Stilblöcke tragen keinen Lesetext.
   for marker in ["script", "style"] {
     while let Some(a) = rest.find(&format!("<{marker}")) {
@@ -100,7 +99,6 @@ pub(crate) fn strip_tags(text: &str) -> String {
         break;
       };
       let cut = format!("{}{}", &rest[..a], &rest[a + b + marker.len() + 3..]);
-      out.clear();
       return strip_tags_inner(&cut);
     }
   }

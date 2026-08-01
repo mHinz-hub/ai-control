@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-window-buttons-left"
+description = "Enables the window_buttons_left command without any pre-configured scope."
+commands.allow = ["window_buttons_left"]
+
+[[permission]]
+identifier = "deny-window-buttons-left"
+description = "Denies the window_buttons_left command without any pre-configured scope."
+commands.deny = ["window_buttons_left"]

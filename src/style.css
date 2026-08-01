@@ -417,6 +417,12 @@ tbody tr:hover {
   gap: 0.4rem;
 }
 
+/* Projekt mit unlesbarer Config: Die Zeile bleibt stehen, der Grund steht
+   darunter — der Ordner muss auffindbar sein, dort wird der Schaden behoben. */
+.proj-error {
+  color: var(--peach);
+}
+
 .proj-icon {
   width: 18px;
   height: 18px;

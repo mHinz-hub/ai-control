@@ -226,6 +226,42 @@
 .d-meta {
   color: var(--faint);
 }
+/* Fehlerleiste über der Fußzeile: die ganze git-Meldung, markierbar,
+   daneben Kopieren und Ausblenden. */
+.commit-error {
+  flex: none;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.commit-error-text {
+  flex: 1;
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  color: var(--err);
+  font:
+    400 11px/1.5 ui-monospace,
+    "JetBrains Mono",
+    monospace;
+}
+.commit-error-actions {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.commit-error .commit-btn.copied {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
 /* Fußzeile: Nachricht links, Knöpfe rechts. */
 .commit-foot {
   flex: none;

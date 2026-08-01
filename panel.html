@@ -6,6 +6,9 @@
   </head>
   <body>
     <div class="panel-topbar" data-tauri-drag-region>
+      <!-- Projekt-Icon und Titel wie im Terminal-Fenster. -->
+      <img id="project-icon" hidden data-tauri-drag-region />
+      <span id="project-name" data-tauri-drag-region></span>
       <!-- Tabs kommen aus der Modul-Registry (panel-wiring). -->
       <div class="panel-tabs" id="panel-tabs"></div>
       <button class="winbtn" id="panel-dock" data-i18n-title="panel.dock">
@@ -45,6 +48,12 @@
         </button>
         <button class="panel-btn draft-only" id="panel-copy" data-i18n-title="panel.copy">
           <svg width="14" height="14" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" /><path d="M10.5 3.2V3A1.5 1.5 0 0 0 9 1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.2" /></svg>
+        </button>
+        <button class="panel-btn draft-only" id="panel-copy-html" data-i18n-title="panel.copyHtml">
+          <svg width="14" height="14" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" /><path d="M10.5 3.2V3A1.5 1.5 0 0 0 9 1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.2" /><path d="M7.5 8.3h4M7.5 10.7h2.6" /></svg>
+        </button>
+        <button class="panel-btn draft-only" id="panel-print" data-i18n-title="panel.print">
+          <svg width="14" height="14" viewBox="0 0 16 16"><path d="M4.5 5V2.5h7V5" /><path d="M4.5 11.5h-1a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v4.5a1 1 0 0 1-1 1h-1" /><rect x="4.5" y="9.5" width="7" height="4" rx="0.8" /></svg>
         </button>
         <button class="panel-btn draft-only" id="panel-archive" data-i18n-title="panel.archive">
           <svg width="14" height="14" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="3.5" rx="1" /><path d="M2.8 6v6.5a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1V6" /><path d="M6.3 9h3.4" /></svg>

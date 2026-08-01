@@ -14,6 +14,9 @@ interface Project {
   pool: string | null;
   running: boolean;
   terminal: { theme: string | null; icon: string | null; title: string | null };
+  /// Gesetzt, wenn die Projekt-Config nicht lesbar ist (kaputtes JSON,
+  /// stehengebliebene Merge-Marker). Das Projekt bleibt in der Liste.
+  error?: string;
 }
 
 interface Pool {
@@ -577,6 +580,11 @@ onUnmounted(() => {
             <strong>{{ p.name }}</strong>
           </span>
           <small>{{ p.path }}</small>
+          <!-- Kaputte Config: der Grund steht an der Zeile, damit der Ordner
+               auffindbar bleibt — dort wird der Schaden behoben. -->
+          <small v-if="p.error" class="proj-error" :title="p.error">
+            {{ $t("projects.configBroken") }}
+          </small>
         </td>
         <td>
           <select :value="p.pool ?? ''" @change="assign(p, $event)">

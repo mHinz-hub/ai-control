@@ -75,6 +75,99 @@ fn is_cinnamon() -> bool {
     .unwrap_or(false)
 }
 
+fn is_xfce() -> bool {
+  std::env::var("XDG_CURRENT_DESKTOP")
+    .map(|d| d.to_uppercase().contains("XFCE"))
+    .unwrap_or(false)
+}
+
+// ---------- Fensterknöpfe ----------
+
+/// Stehen die Fensterknöpfe links? Die Fenster zeichnen ihre Kopfleiste
+/// selbst (keine GTK-Deko) — ohne diese Abfrage säßen sie immer rechts,
+/// entgegen der Einstellung des Desktops.
+pub(crate) fn window_buttons_left() -> bool {
+  if is_kde() {
+    return kde_buttons_left();
+  }
+  if is_xfce() {
+    return xfce_buttons_left();
+  }
+  // GNOME, Cinnamon und die GTK-Ableger teilen dieselbe Einstellung.
+  gsettings_buttons_left()
+}
+
+/// Ausgabe eines Kommandos, ohne Fehlerfall — fehlt das Programm, gibt es
+/// keine Einstellung zu lesen.
+fn cmd_out(prog: &str, args: &[&str]) -> Option<String> {
+  let out = std::process::Command::new(prog).args(args).output().ok()?;
+  if !out.status.success() {
+    return None;
+  }
+  Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// GNOME/Cinnamon: `button-layout` trennt links und rechts mit `:` —
+/// „close,minimize,maximize:appmenu" heißt links, „appmenu:…" rechts.
+/// Cinnamon führt denselben Schlüssel unter org.cinnamon.desktop.
+fn gsettings_buttons_left() -> bool {
+  let schema = if is_cinnamon() {
+    "org.cinnamon.desktop.wm.preferences"
+  } else {
+    "org.gnome.desktop.wm.preferences"
+  };
+  let Some(raw) = cmd_out("gsettings", &["get", schema, "button-layout"]) else {
+    return false;
+  };
+  let layout = raw.trim().trim_matches('\'').trim_matches('"');
+  let Some((links, _)) = layout.split_once(':') else {
+    return false;
+  };
+  ["close", "minimize", "maximize"].iter().any(|b| links.contains(b))
+}
+
+/// XFCE: `/general/button_layout` ist eine Zeichenfolge wie „CMH|O" —
+/// alles vor dem `|` sitzt links (C = close, M = maximize, H = hide).
+fn xfce_buttons_left() -> bool {
+  let Some(raw) = cmd_out(
+    "xfconf-query",
+    &["-c", "xfwm4", "-p", "/general/button_layout"],
+  ) else {
+    return false;
+  };
+  let Some((links, _)) = raw.split_once('|') else {
+    return false;
+  };
+  links.chars().any(|c| matches!(c, 'C' | 'M' | 'H'))
+}
+
+/// KDE: kwinrc führt `ButtonsOnLeft`/`ButtonsOnRight` im Abschnitt
+/// `[org.kde.kdecoration2]`; „X" steht dort für den Schließen-Knopf.
+fn kde_buttons_left() -> bool {
+  let Some(cfg) = std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config/kwinrc"))
+  else {
+    return false;
+  };
+  let Ok(text) = std::fs::read_to_string(cfg) else {
+    return false;
+  };
+  let mut im_abschnitt = false;
+  for zeile in text.lines() {
+    let z = zeile.trim();
+    if z.starts_with('[') {
+      im_abschnitt = z.starts_with("[org.kde.kdecoration");
+      continue;
+    }
+    if !im_abschnitt {
+      continue;
+    }
+    if let Some(wert) = z.strip_prefix("ButtonsOnLeft=") {
+      return wert.contains('X');
+    }
+  }
+  false
+}
+
 // ---------- Secrets ----------
 
 /// apiKeyHelper-Kommando eines apikey-Pools: liest den Key aus dem Keyring

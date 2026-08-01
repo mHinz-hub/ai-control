@@ -13,7 +13,8 @@ Pool, project, and session management for [Claude Code](https://claude.com/claud
 - **Several logins, one click apart** — keep separate Claude Code logins side by side (subscription accounts or API keys) and give every project the one it should run under. Each project starts with its own login; no re-login, no juggling environment variables. An existing login in `~/.claude` is picked up as a pool of its own, so nothing has to be set up twice.
 - **Command history** — every shell command the assistant hands you lands beside the terminal as a copyable tile, with the session's full command history one click away.
 - **Text panel** — Markdown drafts appear next to the terminal instead of scrolling past in the chat: readable, selectable, editable, and copyable in one go.
-- **Archive with full-text search** — keep drafts as Markdown files per project, curated with folder, description, and tags; browse them as a wiki and search their full text.
+- **Archive with full-text search** — keep drafts as Markdown files per project, curated with folder, description, and tags; browse them as a wiki and search their full text. A hit says which field it came from, and opening it highlights the findings in the document and scrolls to them — including in the editor, at the spot you were reading.
+- **Editors that fit the format** — Markdown as source text with syntax colours, shortcuts, running lists and a table dialog, live preview beside it; HTML notes in a WYSIWYG surface with tables, text flow and per-row delete buttons. JSON, YAML, XML and plain text open in the same editor with their own grammar.
 - **What it costs** — tokens and estimated cost per login and project over the last 7 or 30 days, read straight from the session transcripts (retries deduplicated).
 - **One click, one session** — the tray popup lists every project with its icon and a green dot when it runs; a click starts it or brings the running terminal to the front.
 
@@ -26,7 +27,7 @@ Running Claude Code with multiple accounts or credential sets means hitting the 
 - **Sessions** — a built-in terminal per project (xterm.js + PTY) that launches Claude Code with the pool's config directory as `CLAUDE_CONFIG_DIR`. Every terminal runs as its own process — on macOS with its own Dock icon and Cmd-Tab entry, on Linux as its own window with its own app id.
 - **Tray** — the app itself is a pure tray app. Clicking the tray icon opens a popup listing all projects with icon and status dot (green = running); clicking a project starts it or brings the running terminal to the front.
 - **Text panel** — a workspace beside the terminal with four tabs: command tiles, the current draft, an archive wiki, and archive search. Claude writes into it through a bundled MCP server instead of flooding the chat.
-- **Archive** — drafts can be archived as Markdown files into a per-project archive home, curated with folder, description, and tags at archiving time; browsable as a wiki and searchable via full-text search.
+- **Archive** — drafts can be archived as Markdown files into a per-project archive home, curated with folder, description, and tags at archiving time; browsable as a wiki and searchable via full-text search. Notes can also be created there directly — folder, Markdown, HTML, JSON, YAML, XML, plain text — and edited in place. Diagrams live in a hidden `.<note>.res` folder beside their note: out of the file list, and they move and vanish with the note they belong to.
 - **Session watcher** — detects the end of a session by the terminal process disappearing and then (opt-in) syncs the Git repository containing the project: add → commit → pull --rebase → push.
 
 ## Text panel and MCP tools
@@ -44,7 +45,7 @@ The app ships an MCP stdio server (`ai-central --mcp-panel`, server key `text-pa
 
 The panel docks into the terminal window and can be detached into its own window. The header tab bar switches between **Commands** (command tiles), the current **document**, **Wiki**, and **Search** (live search, `#tag` filtering); without a configured archive home the archive tabs stay hidden. The draft's title is taken from its first heading and is editable, as is the content. Spell checking follows `spellcheckLang` (per-text override in the panel).
 
-The archive lives in the project's `archiveHome` (set in `.ai-central/config.json`); documents are plain Markdown files with frontmatter — no database, the search index is built in-memory per query.
+The archive lives in the project's `archiveHome` (set in `.ai-central/config.json`); documents are plain Markdown files with frontmatter — no database, the search index is built in-memory per query. It covers the note body plus title, description, tags and file name as separate fields, along with the content of text files (JSON, YAML, XML, logs, scripts); `.drawio` diagrams open in the bundled viewer, ePub files in the reader.
 
 ![Draft document in the panel beside the terminal](docs/panel-draft.png)
 
@@ -156,7 +157,8 @@ Deleting a project is scoped in three stages, each preceded by a preview of the 
 ├── popup.html            tray popup
 ├── src/                  frontend: Vue 3 + TypeScript
 │                         (incl. wiki-view, search-view, archive-form,
-│                         commands-view + vitest tests)
+│                         commands-view, md-editor, html-editor
+│                         + vitest tests)
 ├── src-tauri/
 │   ├── src/lib.rs        entry point, process roles
 │   ├── src/app.rs        Tauri wiring: tray, main/popup windows, watcher
@@ -184,6 +186,7 @@ The three process roles that binary takes are described under [Architecture](#ar
 |-----------|-------|
 | Shell     | Tauri 2 (Rust) |
 | Frontend  | Vue 3, TypeScript, Vite; vitest (happy-dom) for the panel views |
+| Editors   | CodeMirror 6 (Markdown, JSON, YAML, XML), ProseMirror (HTML notes) |
 | Terminal  | xterm.js, portable-pty |
 | macOS     | objc2 / objc2-app-kit (Dock icon, window focus, tray) |
 | Linux     | GTK 3 / WebKitGTK, ksni (StatusNotifierItem), zbus (D-Bus) |

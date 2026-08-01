@@ -27,6 +27,13 @@
       </div>
       <pre class="commit-diff" id="diff"></pre>
     </div>
+    <div class="commit-error" id="error" hidden>
+      <pre class="commit-error-text" id="error-text"></pre>
+      <div class="commit-error-actions">
+        <button class="commit-btn" id="error-copy" data-i18n="commit.copyError">Fehler kopieren</button>
+        <button class="commit-btn" id="error-close" data-i18n="commit.dismissError">Ausblenden</button>
+      </div>
+    </div>
     <footer class="commit-foot">
       <textarea id="msg" rows="3" spellcheck="true" data-i18n-placeholder="commit.messagePlaceholder"></textarea>
       <div class="commit-actions">

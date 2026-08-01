@@ -2,6 +2,17 @@
    Archiv-Wiki) — gemeinsam für das angedockte Panel (terminal.html) und das
    abgelöste Fenster (panel.html); von beiden Entry-Points importiert. */
 
+/* Abstand der scrollenden Flächen zur Fensterkante: das dekorationslose
+   Fenster (Linux) legt dort 4 px breite Zieh-Zonen darüber. Klebt der
+   Scrollbalken daran, springt der Zeiger beim Zielen zwischen „scrollen" und
+   „Fenstergröße". Der Wiki-Tab hat den Abstand über sein Padding. */
+:root[data-platform="other"] #commands-content,
+:root[data-platform="other"] #todo-content,
+:root[data-platform="other"] #search-content {
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+
 #commands-content {
   flex: 1;
   min-height: 0;
@@ -291,6 +302,18 @@
     system-ui,
     sans-serif;
 }
+/* Herkunft des Treffers, wenn er nicht im Rumpf steht — sonst sähe der
+   Ausschnitt ohne Hervorhebung nach Zufallsfund aus. */
+.hit-field {
+  margin-top: 3px;
+  color: var(--accent);
+  font:
+    500 10px/1.3 -apple-system,
+    system-ui,
+    sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
 .hit-snippet {
   margin-top: 4px;
   color: var(--muted);
@@ -303,6 +326,15 @@
   background: transparent;
   color: var(--warn);
   font-weight: 600;
+}
+/* Fundstelle im geöffneten Dokument: unterlegt, damit sie beim Überfliegen
+   auffällt — anders als im Trefferausschnitt, wo die ganze Kachel schon die
+   Fundstelle ist. */
+.wiki-note-body mark.wiki-hit {
+  background: color-mix(in srgb, var(--warn) 40%, transparent);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 2px;
 }
 .hit-path {
   margin-top: 4px;
@@ -322,35 +354,69 @@
   padding: 14px 16px;
 }
 .wiki-tree::-webkit-scrollbar,
-.wiki-main::-webkit-scrollbar {
+.wiki-note-scroll::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 .wiki-tree::-webkit-scrollbar-thumb,
-.wiki-main::-webkit-scrollbar-thumb {
+.wiki-note-scroll::-webkit-scrollbar-thumb {
   background: var(--line);
   border-radius: 4px;
 }
-/* Baum links, Seite rechts; beide Spalten scrollen unabhängig. */
+/* Baum links, Seite rechts; beide Spalten scrollen unabhängig. Der Baum
+   ist eine eigene Fläche, der Zieh-Griff dazwischen ist die Trennlinie. */
 .wiki-layout {
   display: flex;
   align-items: stretch;
-  gap: 12px;
+  gap: 0;
   flex: 1;
   min-height: 0;
+  /* Unter der Mindestbreite des Inhalts scrollt die Fläche horizontal,
+     statt Kopfzeile und Kacheln rechts zu kappen. */
+  overflow-x: auto;
+}
+/* Mindestbreite der Inhaltsfläche (Regel 2.6): darunter scrollt die
+   Fläche, statt Bedienelemente abzuschneiden. */
+.wiki-main {
+  min-width: 34rem;
 }
 .wiki-tree {
   flex: 0 0 230px;
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  border-right: 1px solid var(--line-strong);
-  padding-right: 8px;
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 8px;
+}
+/* Zieh-Griff zwischen Baum und Inhalt: schmal, mit sichtbarer Linie;
+   beim Anfassen deutlich. */
+.wiki-splitter {
+  flex: none;
+  width: 7px;
+  cursor: col-resize;
+  border-left: 2px solid var(--line-strong);
+  margin-left: 8px;
+}
+.wiki-splitter:hover {
+  border-left-color: var(--accent);
 }
 .wiki-main {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-left: 12px;
+}
+/* Der Inhalt unter der festen Knopfzeile scrollt — in beide Richtungen,
+   wenn ein Diagramm breiter ist als das Fenster. */
+.wiki-note-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 .wiki-tree .wiki-tree-children {
   padding-left: 0;
@@ -406,9 +472,13 @@
 .wiki-tree-icon {
   flex: none;
   display: inline-flex;
-  margin-right: 6px;
+  margin-right: 0.4em;
 }
+/* Symbolgröße relativ zur Schrift (Regel 1.1); das Markup trägt keine
+   width/height-Attribute (1.4). */
 .wiki-tree-icon svg {
+  width: 1.5em;
+  height: 1.5em;
   fill: none;
   stroke: var(--muted);
   stroke-width: 1.3;
@@ -431,19 +501,9 @@
 .wiki-tree summary::-webkit-details-marker {
   display: none;
 }
-.wiki-tree-arrow {
-  flex: none;
-  width: 16px;
-  color: var(--muted);
-  font-size: 13px;
-  text-align: center;
-  transition: transform 0.12s;
-}
-.wiki-tree-arrow:hover {
-  color: var(--text);
-}
-.wiki-tree details[open] > summary .wiki-tree-arrow {
-  transform: rotate(90deg);
+/* Das Ordner-Symbol ist zugleich der Klapp-Schalter. */
+.wiki-tree summary .wiki-tree-icon {
+  cursor: pointer;
 }
 .wiki-tree-name {
   flex: 1;
@@ -452,11 +512,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Aktionen sind immer sichtbar (Regel 3.1) — Hover hebt hervor, es
+   enthüllt nichts. */
 .wiki-tree summary .panel-btn {
-  visibility: hidden;
+  color: var(--muted);
 }
 .wiki-tree summary:hover .panel-btn {
-  visibility: visible;
+  color: var(--text);
 }
 .wiki-tree summary:hover,
 .wiki-tree-root:hover {
@@ -464,7 +526,9 @@
   border-radius: 4px;
 }
 .wiki-tree-root {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 2px;
   width: 100%;
   text-align: left;
   border: none;
@@ -472,9 +536,6 @@
   color: var(--muted);
   border-radius: 4px;
   padding: 2px 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font:
     600 16px/1.7 -apple-system,
     system-ui,
@@ -494,14 +555,14 @@
     sans-serif;
   outline: none;
 }
-/* Zeilen-Aktionen erst beim Überfahren der Zeile. */
+/* Zeilen-Aktionen: immer sichtbar (Regel 3.1), Hover hebt hervor. */
 .wiki-doc-actions {
   display: flex;
-  gap: 2px;
-  visibility: hidden;
+  gap: 0.15em;
+  color: var(--muted);
 }
 .wiki-doc:hover .wiki-doc-actions {
-  visibility: visible;
+  color: var(--text);
 }
 /* Kopfzeile des Baums: Wurzel-Knopf + Ordner anlegen. */
 .wiki-tree-head {
@@ -518,9 +579,9 @@
   background: none;
   color: var(--muted);
   border-radius: 4px;
-  padding: 0 5px;
+  padding: 0 9px;
   font:
-    500 13px/1.4 -apple-system,
+    500 24px/1.4 -apple-system,
     system-ui,
     sans-serif;
   cursor: pointer;
@@ -596,11 +657,136 @@
 .wiki-form-cancel:hover {
   background: var(--tile);
 }
-/* Notiz-Ansicht rechts: großer Titel wie in Trilium, Meta-Zeile, Inhalt. */
+/* Notiz-Ansicht rechts: großer Titel wie in Trilium, Meta-Zeile, Inhalt.
+   Kopf und Inhalt teilen sich eine Maximalbreite — sonst läuft die Zeile
+   in breiten Fenstern ins Uferlose. */
 .wiki-note-head {
-  border-bottom: 1px solid var(--line-strong);
-  padding-bottom: 8px;
-  margin-bottom: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 14px 10px;
+  margin-bottom: 14px;
+  width: 100%;
+  box-sizing: border-box;
+}
+/* Aktions-Knöpfe im Notizkopf und Baum: kräftige Größe. Die SVG-Icons
+   (Papierkorb, Import) tragen feste 14-px-Attribute — die CSS-Breite
+   überstimmt sie, sonst bleiben sie winzig. */
+.wiki-note-titlerow .panel-btn,
+.wiki-tree .panel-btn {
+  font-size: 1.5rem;
+  padding: 0.25em 0.5em;
+}
+.wiki-note-titlerow .panel-btn svg,
+.wiki-tree .panel-btn svg {
+  width: 0.92em;
+  height: 0.92em;
+}
+/* Suchfeld (filtert die Liste) und Sortier-Widget in der Titelzeile. */
+.wiki-filter {
+  flex: none;
+  width: 13em;
+  background: var(--tile);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 0.5em 0.7em;
+  font-size: 0.875rem;
+  outline: none;
+}
+.wiki-filter:focus {
+  border-color: var(--accent);
+}
+/* Senkrechter Strich: trennt die Suche/Sortier-Gruppe von den
+   Aktions-Knöpfen. */
+.wiki-head-sep {
+  flex: none;
+  width: 1px;
+  height: 1.9em;
+  margin: 0 0.7em;
+  background: var(--line-strong);
+}
+/* Sortier-Knopf: trägt die geltende erste Stufe im Klartext (Regel 4.2). */
+.wiki-sort {
+  flex: none;
+  background: var(--tile);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 0.5em 0.9em;
+  font-size: 0.875rem;
+  cursor: pointer;
+  outline: none;
+  white-space: nowrap;
+}
+.wiki-sort:hover {
+  border-color: var(--accent);
+}
+/* Sortier-Menü: Zeilenreihenfolge = Rangfolge. Feste Breite — beim
+   Umsortieren darf das offene Menü nicht springen (Regel 2.3). */
+.wiki-sort-menu {
+  width: 16em;
+  gap: 1px;
+}
+.wiki-sort-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  padding: 0.3em 0.4em 0.3em 0.7em;
+  border-radius: 5px;
+}
+/* Die oberste Zeile ist die geltende erste Stufe. */
+.wiki-sort-row.first {
+  background: var(--surface);
+}
+.wiki-sort-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font:
+    500 0.875rem/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.wiki-sort-row.first .wiki-sort-name {
+  color: var(--accent);
+}
+.wiki-sort-dirs {
+  flex: none;
+  display: flex;
+  gap: 0.15em;
+}
+/* Trefferfläche mindestens 24×24 px (WCAG 2.2, SC 2.5.8). */
+.wiki-sort-dir {
+  min-width: 24px;
+  min-height: 24px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+  border-radius: 5px;
+  padding: 0.1em 0.5em;
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1.3;
+}
+.wiki-sort-dir:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+.wiki-sort-dir.active {
+  background: var(--line);
+  color: var(--accent);
+}
+.wiki-note-titlerow .wiki-form-submit,
+.wiki-note-titlerow .wiki-form-cancel {
+  font-size: 0.95rem;
+  padding: 0.55em 1.2em;
+}
+/* Maximalbreite für Textflächen (Regel 2.5). */
+.wiki-note-head,
+.wiki-main .wiki-note-body:not(.wiki-edit-preview) {
+  max-width: 60rem;
+  margin-inline: auto;
 }
 .wiki-note-titlerow {
   display: flex;
@@ -614,7 +800,7 @@
   color: var(--muted);
   border-radius: 6px;
   padding: 2px 8px;
-  font-size: 20px;
+  font-size: 22px;
   line-height: 1.2;
   cursor: pointer;
 }
@@ -660,10 +846,12 @@
     system-ui,
     sans-serif;
 }
+/* Kopf-Aktionen: immer sichtbar (Regel 3.1). Eine zweite Regel für
+   dieselbe Klasse gab es früher weiter unten — zusammengeführt (6.1). */
 .wiki-note-actions {
   display: flex;
-  gap: 2px;
-  visibility: hidden;
+  align-items: center;
+  gap: 0.15em;
 }
 .wiki-note-head:hover .wiki-note-title.editable {
   cursor: text;
@@ -690,16 +878,18 @@
     system-ui,
     sans-serif;
 }
-.wiki-note-actions {
-  visibility: visible;
-}
 /* WYSIWYG-Editor der HTML-Notizen (ProseMirror). */
 .html-editor {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
+/* Die Werkzeugleiste bleibt beim Scrollen stehen — sie gehört zum Editor,
+   nicht zum Text. */
 .html-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -724,6 +914,55 @@
 .html-tool:hover {
   border-color: var(--accent);
 }
+/* Trenner zwischen den Werkzeug-Gruppen (Blockart │ Zeichen │ Listen │
+   Tabelle). */
+.html-tool-sep {
+  flex: none;
+  align-self: center;
+  width: 1px;
+  height: 1.7em;
+  margin: 0 0.4em;
+  background: var(--line-strong);
+}
+/* Dialog „Tabelle einfügen": Spalten, Zeilen, Kopfzeile. Er sitzt unter der
+   Werkzeugleiste, damit der Bezug zum Knopf sichtbar bleibt — im HTML- wie
+   im Markdown-Editor. */
+.table-form {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+  background: var(--tile);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 0.7em 0.9em;
+  font:
+    400 0.875rem/1.3 -apple-system,
+    system-ui,
+    sans-serif;
+  color: var(--text);
+}
+.table-form label {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+.table-form input[type="number"] {
+  width: 4em;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  color: inherit;
+  padding: 0.3em 0.4em;
+  font: inherit;
+}
+.table-form-check {
+  gap: 0.4em;
+}
+.table-form-actions {
+  display: flex;
+  gap: 0.5em;
+  margin-left: auto;
+}
 .html-surface .ProseMirror {
   min-height: 55vh;
   background: var(--surface);
@@ -740,16 +979,139 @@
 .html-surface .ProseMirror:focus {
   border-color: var(--accent);
 }
+/* Tabelle im Editor: Sie muss als Gitter zu sehen sein, auch wenn keine
+   einzige Zelle gefüllt ist — sonst blinkt der Cursor in einer leeren
+   Fläche. Feste Spaltenbreiten, sichtbare Ränder, abgesetzte Kopfzeile,
+   Mindesthöhe je Zelle. */
 .html-surface .ProseMirror table {
   border-collapse: collapse;
+  table-layout: fixed;
   width: 100%;
   margin: 0 0 0.7em;
 }
 .html-surface .ProseMirror td,
 .html-surface .ProseMirror th {
   border: 1px solid var(--line-strong);
-  padding: 6px 8px;
+  padding: 2px 8px;
+  min-width: 4em;
   vertical-align: top;
+}
+/* Zellen führen Absätze — deren Außenabstand macht die Zeile doppelt so
+   hoch wie nötig. */
+.html-surface .ProseMirror td > p,
+.html-surface .ProseMirror th > p {
+  margin: 0;
+  line-height: 1.35;
+}
+.html-surface .ProseMirror th {
+  background: var(--tile);
+  font-weight: 600;
+  padding: 4px 8px;
+}
+.html-surface .ProseMirror th:not([align]) {
+  text-align: left;
+}
+/* Zelle, in der der Cursor steht — die Antwort auf „wo bin ich". */
+.html-surface .ProseMirror .cell-active {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+/* Löschknöpfe an Zeilen und Spalten: je ein kleines Kreuz, mittig an seiner
+   Spalte bzw. Zeile. Klick löscht sofort. Blass, bis der Zeiger darauf steht
+   — sie sollen die Tabelle nicht überlagern. */
+.html-surface .ProseMirror .pm-table-wrap {
+  position: relative;
+  padding: 17px 0 0 17px;
+  margin: 0 0 0.7em;
+}
+.html-surface .ProseMirror .pm-col-handles {
+  position: absolute;
+  top: 0;
+  left: 17px;
+  display: flex;
+}
+.html-surface .ProseMirror .pm-row-handles {
+  position: absolute;
+  top: 17px;
+  left: 0;
+}
+.html-surface .ProseMirror .pm-col-handle,
+.html-surface .ProseMirror .pm-row-handle {
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  font: 600 15px/1 -apple-system, system-ui, sans-serif;
+}
+/* Am Anfang der Spalte bzw. Zeile, nicht in deren Mitte: dort steht der
+   Knopf über der ersten Zelle und ist der Zeile eindeutig zugeordnet. */
+.html-surface .ProseMirror .pm-col-handle {
+  height: 16px;
+  justify-content: flex-start;
+  padding-left: 3px;
+}
+.html-surface .ProseMirror .pm-row-handle {
+  width: 16px;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 2px;
+}
+.html-surface .ProseMirror .pm-col-handle:hover,
+.html-surface .ProseMirror .pm-row-handle:hover {
+  color: var(--err);
+}
+/* Eine umflossene Tabelle zieht ihren Wrapper mit — sonst bliebe ein Block
+   in voller Breite stehen und der Text käme erst darunter. */
+.html-surface .ProseMirror .pm-table-wrap.fluss-links {
+  float: left;
+  width: auto;
+  margin: 0 1.2em 0.6em 0;
+}
+.html-surface .ProseMirror .pm-table-wrap.fluss-rechts {
+  float: right;
+  width: auto;
+  margin: 0 0 0.6em 1.2em;
+}
+/* Rand: In der fertigen Notiz verschwindet er, im Editor nicht — dort bleibt
+   ein blasses, gestricheltes Gitter stehen. Ohne Linien schreibt man ins
+   Blaue und sieht weder Zellgrenzen noch die Größe der Tabelle. */
+.wiki-note-body table.randlos td,
+.wiki-note-body table.randlos th,
+#panel-content.md table.randlos td,
+#panel-content.md table.randlos th {
+  border: none;
+}
+.html-surface .ProseMirror table.randlos td,
+.html-surface .ProseMirror table.randlos th {
+  border: 1px dashed var(--line-strong);
+}
+.html-surface .ProseMirror table.randlos th {
+  background: transparent;
+}
+/* Textfluss: Eine umflossene Tabelle nimmt nur die Breite, die ihr Inhalt
+   braucht (`table-layout: auto` statt der festen Spalten), und höchstens die
+   halbe Zeile — sonst bleibt für den Text daneben nichts übrig. */
+.html-surface .ProseMirror table.fluss-links,
+.wiki-note-body table.fluss-links,
+#panel-content.md table.fluss-links,
+.html-surface .ProseMirror table.fluss-rechts,
+.wiki-note-body table.fluss-rechts,
+#panel-content.md table.fluss-rechts {
+  width: auto;
+  max-width: 50%;
+  table-layout: auto;
+}
+.html-surface .ProseMirror table.fluss-links,
+.wiki-note-body table.fluss-links,
+#panel-content.md table.fluss-links {
+  float: left;
+  margin: 0 1.2em 0.6em 0;
+}
+.html-surface .ProseMirror table.fluss-rechts,
+.wiki-note-body table.fluss-rechts,
+#panel-content.md table.fluss-rechts {
+  float: right;
+  margin: 0 0 0.6em 1.2em;
 }
 .html-surface .ProseMirror .selectedCell::after {
   content: "";
@@ -764,7 +1126,12 @@
   position: relative;
 }
 /* Markdown-Editor der Notiz (Bearbeiten im Archiv): Rohtext links,
-   Live-Vorschau rechts. */
+   Live-Vorschau rechts. Gedeckelt und zentriert — auf breiten Fenstern
+   werden die Spalten sonst unlesbar breit. */
+.wiki-note-edit {
+  max-width: 94rem;
+  margin-inline: auto;
+}
 .wiki-edit-split {
   display: flex;
   gap: 14px;
@@ -776,24 +1143,22 @@
 }
 .wiki-edit-preview {
   overflow: auto;
-  max-height: 70vh;
+  height: 70vh;
   border-left: 1px solid var(--line-strong);
   padding-left: 14px;
 }
+/* Rohtext-Fläche: Rahmen und Hintergrund liegen hier, alles Innere bringt
+   CodeMirror mit (Zeilenumbruch, Cursor, Farben). */
 .wiki-note-editor {
   box-sizing: border-box;
   width: 100%;
-  min-height: 60vh;
-  resize: vertical;
+  height: 70vh;
+  overflow: hidden;
   background: var(--surface);
-  color: var(--text);
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  padding: 12px 14px;
-  outline: none;
-  font: 400 14px/1.6 "JetBrains Mono", Menlo, monospace;
 }
-.wiki-note-editor:focus {
+.wiki-note-editor:focus-within {
   border-color: var(--accent);
 }
 .wiki-note-error {
@@ -877,6 +1242,37 @@
     system-ui,
     sans-serif;
 }
+/* Diagramm-Ansicht (.drawio): der Viewer zeichnet auf hellem Grund. Er
+   baut sich innen einen Div in Diagramm-Pixelbreite — ab unserer Breite
+   wird gescrollt, nicht abgeschnitten. */
+/* Diagramm-Ansicht: eigene Bühne unter der Knopfzeile, die den Rest des
+   Fensters füllt. Das Diagramm wird beim Öffnen hineingezoomt (zeigeDrawio),
+   gescrollt wird erst, wenn die Zoom-Knöpfe vergrößern. */
+.wiki-note-drawio {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.wiki-note-drawio > div {
+  flex: 1;
+  min-width: 0;
+  background: #fff;
+  border-radius: 8px;
+  padding: 8px;
+  overflow: auto;
+}
+.md-drawio-live {
+  overflow: auto;
+}
+/* Rohtext-Ansicht sonstiger Dateien (JSON, Logs …). */
+.wiki-note-plain {
+  margin: 0;
+  font-family: "JetBrains Mono", Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .wiki-note-body h1,
 .wiki-note-body h2,
 .wiki-note-body h3 {
@@ -937,6 +1333,16 @@
   padding: 6px 8px;
   vertical-align: top;
 }
+/* Kopfzelle in derselben Flucht wie ihre Spalte: die Voreinstellung des
+   Browsers zentriert sie, und der Kopf steht dann versetzt über den Werten.
+   Eine Ausrichtung aus dem Markdown (`:---:`) steht als align-Attribut da
+   und behält Vorrang. */
+.wiki-note-body th:not([align]) {
+  text-align: left;
+}
+.wiki-note-body th {
+  background: var(--surface);
+}
 .wiki-note-children {
   margin-top: 26px;
   background: var(--tile);
@@ -990,26 +1396,75 @@
 }
 .wiki-doc-line {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
 }
-.wiki-doc-title {
+/* Textspalte der Kachel: Titel über Beschreibung, einzeilig mit Ellipse. */
+.wiki-doc-text {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.wiki-doc-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--accent);
   font:
     600 16px/1.4 -apple-system,
     system-ui,
     sans-serif;
 }
+/* Typ-Symbol groß über beide Zeilen der Kachel. */
+.wiki-doc .wiki-tree-icon svg {
+  width: 2.4em;
+  height: 2.4em;
+}
+/* Kachel plus Aktions-Icons dahinter — außerhalb der Kachel, immer
+   sichtbar. */
+.wiki-doc-row {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  margin: 0 0 0.5em;
+}
+.wiki-doc-row:last-child {
+  margin-bottom: 0;
+}
+.wiki-doc-row .wiki-doc {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.wiki-row-actions {
+  /* Feste Spaltenbreite (Platz für zwei Knöpfe): die Kachel davor ist
+     dadurch immer gleich breit, egal wie viele Aktionen eine Zeile
+     trägt (Regel 2.2). */
+  flex: none;
+  width: 5em;
+  display: flex;
+  gap: 0.15em;
+}
+.wiki-row-actions .panel-btn svg {
+  width: 1.25em;
+  height: 1.25em;
+}
 .wiki-doc-date {
-  color: var(--faint);
+  color: var(--muted);
   font-family: "JetBrains Mono", Menlo, monospace;
-  font-size: 11.5px;
+  font-size: 0.8rem;
   white-space: nowrap;
+  text-align: right;
+  line-height: 1.45;
 }
 .wiki-doc-desc {
-  margin-top: 2px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--muted);
   font:
     400 14px/1.5 -apple-system,
@@ -1316,4 +1771,111 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Faltbarer Datei-Baum (JSON/YAML/XML) im Archiv-Datei-Viewer. Die
+   Aufklapper sitzen in einer eigenen Rinne links vom Text: Zweige und
+   Blätter beginnen auf derselben Flucht, der Chevron steht davor. */
+.dt-root {
+  font:
+    400 13px/1.65 ui-monospace,
+    "JetBrains Mono",
+    monospace;
+  padding: 2px 0;
+}
+.dt-children {
+  margin-left: 0.65em;
+  border-left: 1px solid var(--line);
+  padding-left: 0.75em;
+}
+.dt-branch > summary {
+  position: relative;
+  padding: 1px 4px 1px 1.4em;
+  list-style: none;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.dt-branch > summary::-webkit-details-marker {
+  display: none;
+}
+.dt-branch > summary:hover {
+  background: var(--tile);
+}
+.dt-branch > summary::before {
+  content: "";
+  position: absolute;
+  left: 0.35em;
+  top: 50%;
+  width: 0.42em;
+  height: 0.42em;
+  border-right: 1.6px solid var(--muted);
+  border-bottom: 1.6px solid var(--muted);
+  transform: translateY(-60%) rotate(-45deg);
+  transition: transform 0.12s;
+}
+.dt-branch[open] > summary::before {
+  transform: translateY(-70%) rotate(45deg);
+}
+.dt-leaf {
+  padding: 1px 4px 1px 1.4em;
+}
+.dt-key {
+  color: var(--accent);
+}
+.dt-tag {
+  color: var(--accent);
+}
+.dt-str {
+  color: var(--text);
+}
+.dt-num,
+.dt-bool {
+  color: var(--warn);
+}
+.dt-null {
+  color: var(--faint);
+}
+.dt-hint {
+  color: var(--faint);
+}
+
+/* Eingebettetes draw.io-Diagramm in einer Notiz. */
+.md-drawio {
+  display: block;
+  color: var(--faint);
+}
+.md-drawio-live {
+  color: inherit;
+}
+
+/* Editor-Werkzeugleiste (Diagramm einfügen): eigene, abgesetzte Fläche
+   über dem Editor. */
+.wiki-edit-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+/* Werkzeuge des Rohtext-Editors (Diagramm, Tabelle) — eigene Klasse, damit
+   sie nicht mit Abbrechen/Speichern im Kopf verwechselt werden. */
+.wiki-edit-tool {
+  border: 1px solid var(--line-strong);
+  background: var(--tile);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 0.4em 0.8em;
+  cursor: pointer;
+  font:
+    500 0.875rem/1.2 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.wiki-edit-tool:hover {
+  border-color: var(--accent);
 }

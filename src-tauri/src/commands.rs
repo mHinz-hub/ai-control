@@ -367,6 +367,25 @@ pub(crate) fn set_terminal_font_size(size: u32) -> Result<(), String> {
   settings::set_terminal_font_size_in(&Paths::real(), size)
 }
 
+/// Stehen die Fensterknöpfe des Desktops links? Linux fragt den laufenden
+/// Fenstermanager; macOS hat die Ampel immer links, Windows immer rechts.
+/// Ohne verwertbare Antwort gilt rechts.
+#[tauri::command]
+pub(crate) fn window_buttons_left() -> bool {
+  #[cfg(target_os = "macos")]
+  {
+    true
+  }
+  #[cfg(target_os = "windows")]
+  {
+    false
+  }
+  #[cfg(target_os = "linux")]
+  {
+    crate::platform::window_buttons_left()
+  }
+}
+
 #[tauri::command]
 pub(crate) fn spellcheck_lang() -> String {
   settings::spellcheck_lang(&Paths::real())

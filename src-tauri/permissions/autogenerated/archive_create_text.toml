@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-archive-create-text"
+description = "Enables the archive_create_text command without any pre-configured scope."
+commands.allow = ["archive_create_text"]
+
+[[permission]]
+identifier = "deny-archive-create-text"
+description = "Denies the archive_create_text command without any pre-configured scope."
+commands.deny = ["archive_create_text"]

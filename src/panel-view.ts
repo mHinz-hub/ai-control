@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { writeText, writeHtml } from "@tauri-apps/plugin-clipboard-manager";
 import { flash } from "./tiles";
 import { t } from "./messages";
 
@@ -100,6 +100,8 @@ export function linkWikiRefs(root: HTMLElement, onClick: (name: string) => void)
 export function initPanelView(opts: {
   content: HTMLElement;
   copyBtn: HTMLElement;
+  copyHtmlBtn?: HTMLElement;
+  printBtn?: HTMLElement;
   modeBtn: HTMLElement;
   titleEl?: HTMLElement;
   editBtn?: HTMLElement;
@@ -142,6 +144,17 @@ export function initPanelView(opts: {
     await writeText(rawText);
     flash(opts.copyBtn, "copied");
   });
+
+  // Formatiert kopieren: HTML-Flavor für Word/Teams/Mail, Plain-Fallback
+  // bleibt der Markdown-Rohtext.
+  opts.copyHtmlBtn?.addEventListener("click", async () => {
+    await writeHtml(renderMarkdown(rawText), rawText);
+    flash(opts.copyHtmlBtn!, "copied");
+  });
+
+  // Druckdialog des Systems — dort lässt sich auch in eine PDF-Datei drucken.
+  // Was gedruckt wird, regeln die @media-print-Regeln des Fensters.
+  opts.printBtn?.addEventListener("click", () => window.print());
 
   // Titel-Edit: Edit-Button macht den Titel editierbar, Enter/Blur schreibt die
   // geänderte Überschrift zurück, Escape verwirft.

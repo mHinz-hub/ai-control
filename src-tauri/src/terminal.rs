@@ -231,6 +231,7 @@ pub fn term_start(
   for (b, path) in buffers {
     spawn_file_watcher(window.app_handle().clone(), path, b.event);
   }
+  spawn_archive_watcher(project.clone());
 
   terminals.0.lock().unwrap().insert(
     window.label().to_string(),
@@ -259,6 +260,75 @@ fn spawn_file_watcher(app: AppHandle, path: std::path::PathBuf, event: &'static 
       }
     }
   });
+}
+
+/// Beobachtet den Archiv-Ordner des Projekts: ändert eine fremde Anwendung
+/// eine Datei darin — draw.io speichert ein Diagramm, ein Editor eine Notiz —,
+/// schreibt der Watcher die frische Übersicht in den Wiki-Puffer; der
+/// Puffer-Watcher meldet sie als `wiki-update` an die Fenster. Ohne ihn sähe
+/// die App nur die Änderungen, die sie selbst ausgelöst hat.
+///
+/// Gepollt wird eine Signatur aus Pfad, mtime und Größe aller Dateien — das
+/// Archiv umfasst Hunderte Dateien, kein notify-Crate nötig.
+fn spawn_archive_watcher(project: String) {
+  std::thread::spawn(move || {
+    let mut last: Option<u64> = None;
+    loop {
+      std::thread::sleep(std::time::Duration::from_millis(700));
+      let Ok(home) = crate::domain::archive::require_archive_home(&project) else {
+        continue;
+      };
+      let sig = archive_signature(&home);
+      if last == Some(sig) {
+        continue;
+      }
+      // Erster Durchlauf merkt nur den Stand — die Übersicht ist frisch.
+      let bekannt = last.is_some();
+      last = Some(sig);
+      if !bekannt {
+        continue;
+      }
+      let _ = wiki_refresh_page(&project, &home);
+      // Nach dem Schreiben neu erfassen: ensure_ids/ensure_node_texts können
+      // Dateien angefasst haben, das wäre sonst der nächste „Fremdzugriff".
+      last = Some(archive_signature(&home));
+    }
+  });
+}
+
+/// Signatur des Archiv-Baums: Pfad, mtime und Größe jeder Datei.
+fn archive_signature(home: &std::path::Path) -> u64 {
+  use std::hash::{Hash, Hasher};
+  let mut hasher = std::collections::hash_map::DefaultHasher::new();
+  let mut stack = vec![home.to_path_buf()];
+  while let Some(dir) = stack.pop() {
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+      continue;
+    };
+    // Sortiert: die Reihenfolge des Dateisystems ist nicht zugesichert.
+    let mut namen: Vec<_> = entries.flatten().map(|e| e.path()).collect();
+    namen.sort();
+    for path in namen {
+      if path.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')) {
+        continue;
+      }
+      if path.is_dir() {
+        stack.push(path);
+        continue;
+      }
+      path.to_string_lossy().hash(&mut hasher);
+      if let Ok(meta) = std::fs::metadata(&path) {
+        meta.len().hash(&mut hasher);
+        if let Ok(m) = meta.modified() {
+          if let Ok(d) = m.duration_since(std::time::UNIX_EPOCH) {
+            d.as_secs().hash(&mut hasher);
+            d.subsec_nanos().hash(&mut hasher);
+          }
+        }
+      }
+    }
+  }
+  hasher.finish()
 }
 
 /// Aktueller Inhalt eines Modul-Puffers (Erstbefüllung einer Panel-Ansicht);
@@ -659,6 +729,21 @@ pub fn archive_delete(project: String, id: String) -> Result<(), String> {
 }
 
 
+/// Löscht einen Ordner samt Inhalt (Zeilen-Aktion der Übersicht); danach
+/// Übersicht. Zeigt die Panel-Verknüpfung in den Ordner, fällt sie mit weg.
+#[tauri::command]
+pub fn archive_delete_folder(project: String, path: String) -> Result<(), String> {
+  let home = crate::domain::archive::require_archive_home(&project)?;
+  let dir = home.join(&path);
+  if let Some(cur) = panel_source(&project) {
+    if cur.strip_prefix(&dir).is_ok() {
+      std::fs::remove_file(panel_source_file(&project)).map_err(|e| e.to_string())?;
+    }
+  }
+  crate::domain::archive_ops::delete_folder(&home, &path)?;
+  wiki_refresh_page(&project, &home)
+}
+
 /// Legt einen Ordner im Archiv an (Plus im Baum); danach Übersicht.
 #[tauri::command]
 pub fn archive_create_folder(project: String, parent: String, name: String) -> Result<(), String> {
@@ -669,6 +754,174 @@ pub fn archive_create_folder(project: String, parent: String, name: String) -> R
   crate::domain::archive_ops::ensure_node_texts(&home, &display)?;
   crate::domain::archive_ops::ensure_ids(&home)?;
   wiki_refresh_page(&project, &home)
+}
+
+/// Adresse einer Archiv-Datei: entweder eine Index-ID oder — mit dem Präfix
+/// `path:` — ein relpath. Ressourcen einer Notiz liegen im versteckten
+/// Ordner `.<name>.res`, den der Archiv-Scan überspringt; sie haben damit
+/// keine ID und werden über ihren Pfad angesprochen.
+fn rel_of(home: &std::path::Path, id: &str) -> Result<String, String> {
+  match id.strip_prefix("path:") {
+    Some(rel) => Ok(rel.to_string()),
+    None => crate::domain::archive_index::resolve_id(home, id),
+  }
+}
+
+/// Liest eine sonstige Archiv-Datei (JSON, Log, Skript …) als Rohtext —
+/// Inhalt der Datei-Ansicht im Archiv-Tab.
+#[tauri::command]
+pub fn archive_read_file(project: String, id: String) -> Result<String, String> {
+  let home = crate::domain::archive::require_archive_home(&project)?;
+  let relpath = rel_of(&home, &id)?;
+  let path = crate::domain::archive_ops::file_path(&home, &relpath)?;
+  let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+  String::from_utf8(bytes).map_err(|_| format!("keine Textdatei: {relpath}"))
+}
+
+/// Kopiert gewählte Dateien in den Ordner des Knotens `parent` (Datei-Dialog
+/// im Archiv-Tab); danach Übersicht. Namen bleiben erhalten, Kollisionen
+/// bekommen einen Zähler.
+#[tauri::command]
+pub fn archive_import(
+  project: String,
+  parent: String,
+  paths: Vec<String>,
+) -> Result<(), String> {
+  let home = crate::domain::archive::require_archive_home(&project)?;
+  let dir = home.join(dir_under(&home, &parent)?);
+  std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+  for src in &paths {
+    let src = std::path::Path::new(src);
+    let name = src
+      .file_name()
+      .ok_or_else(|| format!("kein Dateiname: {}", src.display()))?
+      .to_string_lossy()
+      .to_string();
+    let mut target = dir.join(&name);
+    let mut lauf = 2;
+    while target.exists() {
+      let stem = std::path::Path::new(&name).file_stem().unwrap_or_default().to_string_lossy();
+      let ext = std::path::Path::new(&name)
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+      target = dir.join(format!("{stem} ({lauf}){ext}"));
+      lauf += 1;
+    }
+    std::fs::copy(src, &target).map_err(|e| format!("{}: {e}", src.display()))?;
+  }
+  wiki_refresh_page(&project, &home)
+}
+
+/// Leeres draw.io-Dokument: eine Seite ohne Zellen — die Desktop-App füllt es.
+const DRAWIO_LEER: &str = concat!(
+  "<mxfile><diagram id=\"d1\" name=\"Seite-1\"><mxGraphModel><root>",
+  "<mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/>",
+  "</root></mxGraphModel></diagram></mxfile>\n"
+);
+
+/// Legt ein leeres Diagramm im Ressourcen-Ordner der Notiz `near` an
+/// (Diagramm-Knopf im Editor) und liefert den relpath — die Notiz
+/// referenziert ihn als `![](./.<notiz>.res/<name>.drawio)`, geöffnet wird er
+/// in der Desktop-App.
+#[tauri::command]
+pub fn archive_create_drawio(
+  project: String,
+  near: String,
+  name: String,
+) -> Result<String, String> {
+  let home = crate::domain::archive::require_archive_home(&project)?;
+  let rel = crate::domain::archive_index::resolve_id(&home, &near)?;
+  let slug = crate::domain::archive::slugify(name.trim());
+  if slug.is_empty() {
+    return Err("Diagrammname fehlt".into());
+  }
+  let ordner = crate::domain::archive_ops::res_dir(&rel);
+  let dir = home.join(&ordner);
+  std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+  let ziel = dir.join(format!("{slug}.drawio"));
+  match std::fs::OpenOptions::new().write(true).create_new(true).open(&ziel) {
+    Ok(mut f) => std::io::Write::write_all(&mut f, DRAWIO_LEER.as_bytes())
+      .map_err(|e| format!("{}: {e}", ziel.display()))?,
+    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+      return Err(format!(
+        "Ziel existiert bereits: {}",
+        ziel.strip_prefix(&home).unwrap_or(&ziel).display()
+      ))
+    }
+    Err(e) => return Err(format!("{}: {e}", ziel.display())),
+  }
+  Ok(format!("{ordner}/{slug}.drawio"))
+}
+
+/// Die Flatpak-Kennung der draw.io-Desktop-App.
+const DRAWIO_FLATPAK: &str = "com.jgraph.drawio.desktop";
+
+/// Wie draw.io installiert ist: Binary im PATH, Flatpak (System oder Nutzer),
+/// auf dem Mac der App-Ordner. None heißt: nicht installiert, der
+/// Editier-Knopf entfällt.
+enum Drawio {
+  Programm(std::path::PathBuf),
+  Flatpak,
+  #[cfg(target_os = "macos")]
+  MacApp,
+}
+
+fn drawio_finden() -> Option<Drawio> {
+  if let Some(pfade) = std::env::var_os("PATH") {
+    for dir in std::env::split_paths(&pfade) {
+      let p = dir.join("drawio");
+      if p.is_file() {
+        return Some(Drawio::Programm(p));
+      }
+    }
+  }
+  let nutzer = crate::platform::home_dir()
+    .join(".local/share/flatpak/exports/bin")
+    .join(DRAWIO_FLATPAK);
+  let system = std::path::Path::new("/var/lib/flatpak/exports/bin").join(DRAWIO_FLATPAK);
+  if nutzer.is_file() || system.is_file() {
+    return Some(Drawio::Flatpak);
+  }
+  #[cfg(target_os = "macos")]
+  if std::path::Path::new("/Applications/draw.io.app").exists() {
+    return Some(Drawio::MacApp);
+  }
+  None
+}
+
+/// Ist die draw.io-Desktop-App installiert? (Start-Prüfung des Archiv-Tabs.)
+#[tauri::command]
+pub fn drawio_available() -> bool {
+  drawio_finden().is_some()
+}
+
+/// Öffnet eine `.drawio`-Datei des Archivs in der draw.io-Desktop-App.
+#[tauri::command]
+pub fn drawio_open(project: String, id: String) -> Result<(), String> {
+  let home = crate::domain::archive::require_archive_home(&project)?;
+  let relpath = rel_of(&home, &id)?;
+  let path = crate::domain::archive_ops::file_path(&home, &relpath)?;
+  let mut cmd = match drawio_finden().ok_or("draw.io ist nicht installiert")? {
+    Drawio::Programm(programm) => {
+      let mut c = std::process::Command::new(programm);
+      c.arg(&path);
+      c
+    }
+    Drawio::Flatpak => {
+      let mut c = std::process::Command::new("flatpak");
+      c.arg("run").arg(DRAWIO_FLATPAK).arg(&path);
+      c
+    }
+    #[cfg(target_os = "macos")]
+    Drawio::MacApp => {
+      let mut c = std::process::Command::new("open");
+      c.arg("-a").arg("draw.io").arg(&path);
+      c
+    }
+  };
+  cmd.spawn().map_err(|e| format!("draw.io starten: {e}"))?;
+  Ok(())
 }
 
 /// Pfad eines neuen Kindes unterhalb des Knotens `parent` (ID; leer =
@@ -683,21 +936,27 @@ fn join_under(
     return Err("Name fehlt".into());
   }
   let slug = crate::domain::archive::slugify(name);
-  if parent.is_empty() {
+  let dir = dir_under(home, parent)?;
+  if dir.is_empty() {
     return Ok(slug);
   }
-  // Der Zielordner ist der Ordner neben dem Knotentext des Elternteils.
-  let rel = crate::domain::archive_index::resolve_id(home, parent)?;
-  let stem = std::path::Path::new(&rel)
-    .file_stem()
-    .unwrap_or_default()
-    .to_string_lossy()
-    .to_string();
-  let dir = match rel.rsplit_once('/') {
-    Some((head, _)) => format!("{head}/{stem}"),
-    None => stem,
-  };
   Ok(format!("{dir}/{slug}"))
+}
+
+/// Ordner-Pfad zum Knoten `parent` (ID; leer = Wurzel) — das Verzeichnis,
+/// in dem die Notiz des Knotens liegt.
+fn dir_under(home: &std::path::Path, parent: &str) -> Result<String, String> {
+  if parent.is_empty() {
+    return Ok(String::new());
+  }
+  // Die Notiz eines Ordners liegt IN ihm (`<ordner>/index.md`) — der Ordner
+  // ist damit schlicht ihr Verzeichnis. Eine gewöhnliche Notiz als Ziel
+  // meint ebenso den Ordner, in dem sie liegt.
+  let rel = crate::domain::archive_index::resolve_id(home, parent)?;
+  Ok(match rel.rsplit_once('/') {
+    Some((head, _)) => head.to_string(),
+    None => String::new(),
+  })
 }
 
 /// Legt ein leeres Dokument an (Plus im Listenkopf) und öffnet es im
@@ -752,21 +1011,52 @@ pub fn archive_create_html(
   note_id(&home.join(rel))
 }
 
+/// Legt eine Textdatei unter dem Knoten an (`text`, `json`, `yaml`, `xml`).
+/// Sie bekommt kein Frontmatter und damit keine ID — angesprochen wird sie
+/// über ihren Pfad.
+#[tauri::command]
+pub fn archive_create_text(
+  project: String,
+  parent: String,
+  name: String,
+  art: String,
+) -> Result<String, String> {
+  let home = crate::domain::archive::require_archive_home(&project)?;
+  let rel_new = join_under(&home, &parent, &name)?;
+  let folder = rel_new.rsplit_once('/').map(|(h, _)| h.to_string()).unwrap_or_default();
+  let rel = crate::domain::archive_ops::create_text(&home, &folder, &name, &art)?;
+  wiki_refresh_page(&project, &home)?;
+  // Die Datei steht in der Übersicht — angesprochen wird sie wie jede andere
+  // Datei über ihre Index-ID, damit die Ansicht sie auswählen kann.
+  Ok(format!("file:{rel}"))
+}
+
+/// Schreibt eine Textdatei des Archivs zurück (Editor für JSON, YAML, XML,
+/// Klartext).
+#[tauri::command]
+pub fn archive_write_text(project: String, id: String, text: String) -> Result<(), String> {
+  let home = crate::domain::archive::require_archive_home(&project)?;
+  let relpath = rel_of(&home, &id)?;
+  crate::domain::archive_ops::write_text(&home, &relpath, &text)?;
+  wiki_refresh_page(&project, &home)
+}
+
 /// Nebenfenster eines Projekts (Archiv, Commit): gleiche Optik, gleiche
-/// Monitorwahl, gleiche Plattform-Deko — nur Label, Seite, Titelzusatz und
-/// die Größenanteile unterscheiden sich.
+/// Plattform-Deko — nur Label, Seite, Titelzusatz und die Öffnungsgröße
+/// unterscheiden sich.
 ///
-/// Die Größe wird EINMAL beim Öffnen gesetzt; danach fasst niemand sie mehr
-/// an, was der Nutzer zieht, bleibt. Maßgeblich ist der Monitor des
-/// Terminal-Fensters, von dem der Öffner kam — bei mehreren Monitoren zählt
-/// der, vor dem der Nutzer sitzt (Wayland kennt zudem keinen „primären").
+/// Die Größe ist eine feste logische Öffnungsgröße, unabhängig vom Monitor —
+/// keine Monitor-Abfrage, aus der auf dem falschen Schirm eine Riesenbreite
+/// entstehen könnte. Sie wird EINMAL beim Öffnen gesetzt; was der Nutzer
+/// zieht oder maximiert, bleibt. Platziert wird zentriert; unter Wayland
+/// entscheidet ohnehin der Compositor (aktiver Schirm).
 async fn open_project_window(
   app: &AppHandle,
   project: &str,
   label: &str,
   url: String,
   title_suffix: &str,
-  (fw, fh): (f64, f64),
+  (w, h): (f64, f64),
 ) -> Result<(), String> {
   let cfg = project_config(project)?;
   let (r, g, b) = theme_background(cfg.terminal.theme.as_deref().unwrap_or_default());
@@ -776,35 +1066,14 @@ async fn open_project_window(
     .as_deref()
     .or(cfg.name.as_deref())
     .unwrap_or(project);
-  let monitor = app
-    .get_webview_window(&format!("term-{project}"))
-    .and_then(|w| w.current_monitor().ok().flatten())
-    .or_else(|| app.primary_monitor().ok().flatten())
-    .or_else(|| app.available_monitors().ok().and_then(|m| m.into_iter().next()));
-  let (w, h) = match &monitor {
-    Some(m) => {
-      let s = m.size().to_logical::<f64>(m.scale_factor());
-      (s.width * fw, s.height * fh)
-    }
-    // Kein Monitor abfragbar: Standard-Bildschirm 1920×1080 annehmen,
-    // gleiche Faktoren.
-    None => (1920.0 * fw, 1080.0 * fh),
-  };
   let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
     .title(format!("{title} — {title_suffix}"))
     .inner_size(w, h)
+    // Unter dieser Größe ist das Fenster nicht mehr benutzbar — kleiner
+    // lässt es sich nicht ziehen.
+    .min_inner_size(680.0, 480.0)
+    .center()
     .background_color(tauri::window::Color(r, g, b, 0xff));
-  // Zentriert auf DEM Monitor, dessen Größe oben zählte — .center() nähme
-  // sonst einen anderen.
-  let builder = match &monitor {
-    Some(m) => {
-      let scale = m.scale_factor();
-      let ms = m.size().to_logical::<f64>(scale);
-      let mp = m.position().to_logical::<f64>(scale);
-      builder.position(mp.x + (ms.width - w) / 2.0, mp.y + (ms.height - h) / 2.0)
-    }
-    None => builder.center(),
-  };
   // macOS: Titelbar als Overlay über der eigenen Kopfleiste — eine Zeile,
   // wie im Terminal-Fenster; die Topbar der Seite ist Drag-Region.
   #[cfg(target_os = "macos")]
@@ -822,8 +1091,8 @@ async fn open_project_window(
 /// vorn. Async, weil Fenster-Erzeugung aus einem synchronen Command auf dem
 /// GTK-Mainloop klemmen kann (Tauri-Vorgabe für window create in Commands).
 ///
-/// Größe: 85 % der Bildschirmbreite, 92 % der Höhe (Vorbild Trilium, kein
-/// Vollbild) — das Archiv ist die Lesefläche und darf groß sein.
+/// Größe: feste 1280×900 — groß genug zum Lesen, füllt keinen Schirm;
+/// wer mehr will, zieht oder maximiert.
 #[tauri::command]
 pub async fn open_panel_window(
   app: AppHandle,
@@ -848,7 +1117,7 @@ pub async fn open_panel_window(
     Some(m) => format!("panel.html?project={project}&mode={m}"),
     None => format!("panel.html?project={project}"),
   };
-  open_project_window(&app, &project, &label, url, "Dokument", (0.85, 0.92)).await
+  open_project_window(&app, &project, &label, url, "Dokument", (1280.0, 900.0)).await
 }
 
 /// Debug: JS-Fehler aus dem Terminal-Fenster ins Dev-Log.
@@ -958,5 +1227,5 @@ pub async fn open_commit_window(app: AppHandle, project: String) -> Result<(), S
   let cfg = project_config(&project)?;
   let theme = cfg.terminal.theme.unwrap_or_default();
   let url = format!("commit.html?project={project}&theme={theme}");
-  open_project_window(&app, &project, &label, url, "Commit", (0.8, 0.85)).await
+  open_project_window(&app, &project, &label, url, "Commit", (1000.0, 700.0)).await
 }

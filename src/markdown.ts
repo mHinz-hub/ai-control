@@ -70,6 +70,11 @@ renderer.image = ({ href, title, text }: Tokens.Image) => {
   const safe = safeHref(href, OK_IMAGE);
   // Auswärtiges Bild: nur der Alt-Text, keine Anfrage nach draußen.
   if (!safe) return escapeHtml(text);
+  // Eingebettetes Diagramm: Platzhalter, den die Archiv-Ansicht mit dem
+  // draw.io-Viewer füllt — ein <img> könnte das XML nicht darstellen.
+  if (/\.drawio$/i.test(safe)) {
+    return `<span class="md-drawio" data-drawio="${escapeHtml(safe)}">${escapeHtml(text || safe)}</span>`;
+  }
   const t = title ? ` title="${escapeHtml(title)}"` : "";
   return `<img src="${escapeHtml(safe)}" alt="${escapeHtml(text)}"${t}>`;
 };

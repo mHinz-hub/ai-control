@@ -81,11 +81,40 @@ describe("initSearchView", () => {
     expect(tile.querySelector(".hit-title")!.textContent).toBe("X");
     expect(tile.querySelectorAll("mark").length).toBe(1);
     tile.click();
+    // Die markierten Wörter des Ausschnitts gehen mit — das geöffnete
+    // Dokument hebt genau sie hervor.
     expect(onOpen).toHaveBeenCalledWith(
       "/tmp/archiv/a/2026-01-01_0000-x.md",
       "a/2026-01-01_0000-x.md",
       "id-x",
+      ["arch"],
     );
+  });
+
+  /// Ein Treffer außerhalb des Rumpfs nennt sein Feld und liefert keine
+  /// Fundstelle — im Dokument gäbe es nichts zu markieren.
+  it("nennt das Feld bei Treffern außerhalb des Textes", () => {
+    const { view, onOpen } = setup();
+    view.set(
+      JSON.stringify({
+        query: "adr",
+        tag: null,
+        home: "/tmp/archiv",
+        hits: [
+          {
+            id: "id-x",
+            relpath: "x.md",
+            title: "X",
+            field: "tags",
+            snippet: "**adr** infra",
+          },
+        ],
+      }),
+    );
+    const tile = document.querySelector<HTMLElement>(".hit-tile")!;
+    expect(tile.querySelector(".hit-field")!.textContent).toBe("im Schlagwort");
+    tile.click();
+    expect(onOpen).toHaveBeenCalledWith("/tmp/archiv/x.md", "x.md", "id-x", []);
   });
 
   it("zeigt „Keine Treffer“ bei leerem Ergebnis", () => {

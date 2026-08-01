@@ -11,8 +11,20 @@ interface Hit {
   id: string;
   relpath: string;
   title: string;
+  /// Getroffenes Feld: `text` (Rumpf) oder `title`, `tags`, `description`,
+  /// `name`.
+  field?: string;
   snippet: string;
 }
+
+/// Beschriftung des getroffenen Feldes; der Rumpf braucht keine, dort ist der
+/// Ausschnitt selbst die Auskunft.
+const FELD_LABEL: Record<string, string> = {
+  title: "search.fieldTitle",
+  tags: "search.fieldTags",
+  description: "search.fieldDescription",
+  name: "search.fieldName",
+};
 
 interface SearchRun {
   query: string;
@@ -26,9 +38,16 @@ export interface SearchView {
   empty(): boolean;
 }
 
+/// Die Wörter, die FTS5 im Ausschnitt markiert hat — Grundlage der
+/// Hervorhebung im geöffneten Dokument. Die Roh-Eingabe taugt dafür nicht:
+/// Bei `arch*` steht dort das Muster, im Text aber „Archiv".
+function marken(snippet: string): string[] {
+  return snippet.split("**").filter((_, i) => i % 2);
+}
+
 export function initSearchView(
   container: HTMLElement,
-  onOpen: (path: string, relpath: string, id: string) => void,
+  onOpen: (path: string, relpath: string, id: string, marken: string[]) => void,
   onSearch: (query: string) => void,
 ): SearchView {
   let count = 0;
@@ -101,15 +120,25 @@ export function initSearchView(
       : t("search.noHits", { scope });
     results.append(head);
     for (const hit of run.hits) {
+      // Ein Treffer außerhalb des Rumpfs sagt, wo er steckt — und bringt
+      // keine Fundstelle mit, die sich im Dokument markieren ließe.
+      const feld = hit.field && hit.field !== "text" ? FELD_LABEL[hit.field] : null;
+      const teile: (HTMLElement | { cls: string; text: string })[] = [
+        { cls: "hit-title", text: hit.title },
+      ];
+      if (feld) teile.push({ cls: "hit-field", text: t(feld) });
+      teile.push(snippetEl(hit.snippet), { cls: "hit-path", text: hit.relpath });
       results.append(
         renderTile({
           cls: "hit-tile",
-          parts: [
-            { cls: "hit-title", text: hit.title },
-            snippetEl(hit.snippet),
-            { cls: "hit-path", text: hit.relpath },
-          ],
-          onClick: () => onOpen(`${run.home}/${hit.relpath}`, hit.relpath, hit.id),
+          parts: teile,
+          onClick: () =>
+            onOpen(
+              `${run.home}/${hit.relpath}`,
+              hit.relpath,
+              hit.id,
+              feld ? [] : marken(hit.snippet),
+            ),
         }),
       );
     }

@@ -14,9 +14,11 @@ import "./commit-window.css";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { applyTheme, THEMES } from "./themes";
 import { applyI18n, t } from "./messages";
 import { renderDiff } from "./diff-view";
+import { flash } from "./tiles";
 
 interface ChangedFile {
   path: string;
@@ -65,6 +67,14 @@ window.addEventListener("unhandledrejection", (e) =>
 // behält die native Ampel.
 const isMac = /Mac|Macintosh/.test(navigator.userAgent);
 document.documentElement.dataset.platform = isMac ? "mac" : "other";
+// Seite der Fensterknöpfe folgt dem Desktop (GNOME/Cinnamon, KDE, XFCE). Das
+// Flag steuert die eigene Knopfgruppe; macOS zeichnet die Ampel selbst und
+// reserviert ihr über data-platform Platz — dort bleibt es ungesetzt.
+if (!isMac) {
+  void invoke<boolean>("window_buttons_left").then((links) => {
+    if (links) document.documentElement.dataset.winbtns = "left";
+  });
+}
 document.getElementById("win-close")!.addEventListener("click", () => win.close());
 if (!isMac) {
   document.getElementById("win-min")!.addEventListener("click", () => win.minimize());
@@ -92,6 +102,8 @@ const allBox = document.getElementById("all") as HTMLInputElement;
 const statusLine = document.getElementById("status")!;
 const commitBtn = document.getElementById("commit") as HTMLButtonElement;
 const pushBtn = document.getElementById("commit-push") as HTMLButtonElement;
+const errorBox = document.getElementById("error")!;
+const errorText = document.getElementById("error-text")!;
 
 let repos: Repo[] = [];
 /// Ausgewählte Dateien je Repo — beim Laden alles, wie `git add -A`.
@@ -111,6 +123,23 @@ function say(text: string, bad = false) {
   statusLine.textContent = text;
   statusLine.classList.toggle("bad", bad);
 }
+
+/// Fehler zweistufig: die Fußzeile trägt die Kurzfassung, die Leiste darüber
+/// die ganze Meldung von git — mehrzeilig, markierbar und kopierbar.
+function showFail(summary: string, detail: string) {
+  say(summary, true);
+  errorText.textContent = detail.trim() || summary;
+  errorBox.hidden = false;
+}
+
+document.getElementById("error-close")!.addEventListener("click", () => {
+  errorBox.hidden = true;
+});
+const copyBtn = document.getElementById("error-copy")!;
+copyBtn.addEventListener("click", async () => {
+  await writeText(errorText.textContent ?? "");
+  flash(copyBtn, "copied");
+});
 
 // ---------- Repo-Spalte ----------
 
@@ -155,11 +184,12 @@ function paintDot(path: string) {
   dot.title = push ? pushReason(push) : t("commit.checking");
 }
 
-/// Grund, warum ein Push nicht durchgeht: die Meldung von git, und wo git
-/// nichts sagt (kein Upstream), der eigene Text.
+/// Grund, warum ein Push nicht durchgeht: die ganze Meldung von git (der
+/// Tooltip zeigt sie mehrzeilig), und wo git nichts sagt (kein Upstream),
+/// der eigene Text.
 function pushReason(push: PushCheck): string {
   if (push.ok) return "";
-  return firstLine(push.detail) || t("commit.noUpstream");
+  return push.detail.trim() || t("commit.noUpstream");
 }
 
 function selectRepo(path: string) {
@@ -261,8 +291,11 @@ function updateActions() {
   pushBtn.title = push ? pushReason(push) : t("commit.checking");
 }
 
-function firstLine(text: string): string {
-  return text.split("\n").find((l) => l.trim()) ?? "";
+/// Aussagekräftigste Zeile einer git-Meldung. Push-Fehler beginnen mit
+/// »To <url>« — der Grund folgt erst in den error:/fatal:/»!«-Zeilen.
+function gitReason(text: string): string {
+  const lines = text.split("\n").filter((l) => l.trim());
+  return (lines.find((l) => /^(error|fatal):|^\s*!/.test(l)) ?? lines[0] ?? "").trim();
 }
 
 /// Committet genau das aktive Repo — nie mehrere auf einmal: jedes Repo hat
@@ -276,6 +309,7 @@ async function runCommit(push: boolean) {
   const name = repo(dir).name;
   commitBtn.disabled = true;
   pushBtn.disabled = true;
+  errorBox.hidden = true;
   let done: CommitDone;
   try {
     done = await invoke<CommitDone>("git_commit", {
@@ -286,14 +320,18 @@ async function runCommit(push: boolean) {
       push,
     });
   } catch (e) {
-    say(`${name}: ${e}`, true);
+    showFail(`${name}: ${gitReason(String(e))}`, String(e));
     updateActions();
     return;
   }
   messages.delete(dir);
   await reload(dir);
-  if (done.push_error) say(t("commit.pushFailed", { name, grund: firstLine(done.push_error) }), true);
-  else say(t("commit.done", { name }));
+  if (done.push_error) {
+    showFail(
+      t("commit.pushFailed", { name, grund: gitReason(done.push_error) }),
+      done.push_error,
+    );
+  } else say(t("commit.done", { name }));
 }
 
 // Das Feld ist die eine Quelle für die Nachricht des aktiven Repos; jeder

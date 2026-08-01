@@ -17,9 +17,24 @@ pub(crate) struct Hit {
   /// Pfad relativ zum Archiv-Home (Anzeige).
   pub(crate) relpath: String,
   pub(crate) title: String,
-  /// Textausschnitt um die Fundstelle, Treffer in `**…**`.
+  /// Woher der Treffer stammt: `text` (Rumpf), sonst `title`, `description`,
+  /// `tags` oder `name`. Nur ein Rumpf-Treffer hat eine Stelle im Dokument,
+  /// die sich anspringen und markieren lässt.
+  pub(crate) field: &'static str,
+  /// Textausschnitt um die Fundstelle, Treffer in `**…**`. Bei Treffern
+  /// außerhalb des Rumpfs steht hier der Inhalt des Feldes, ebenso markiert.
   pub(crate) snippet: String,
 }
+
+/// Indexspalten in der Reihenfolge, in der eine Fundstelle zählt: der Rumpf
+/// zuerst, denn nur er trägt eine anspringbare Stelle.
+const FELDER: &[(usize, &str)] = &[
+  (6, "text"),
+  (3, "title"),
+  (5, "tags"),
+  (4, "description"),
+  (2, "name"),
+];
 
 /// Durchsucht das Archiv unter `home`. `query` ist FTS5-Syntax (Wörter,
 /// "Phrasen", Präfix*); `tag` engt auf ein Schlagwort ein. Treffer nach
@@ -45,19 +60,38 @@ pub(crate) fn search(
     (true, None) => return Ok(Vec::new()),
   };
   let conn = build_index(home)?;
+  // Je Feld ein eigener Ausschnitt: `snippet` markiert nur dort, wo die
+  // Spalte selbst getroffen wurde. Daran hängt, woher der Treffer stammt —
+  // ein Titel-Treffer ohne diese Unterscheidung zeigte den Textanfang ohne
+  // jede Hervorhebung und sähe aus wie ein Zufallsfund.
+  let spalten: String = FELDER
+    .iter()
+    .map(|(i, _)| format!("snippet(docs, {i}, '**', '**', ' … ', 12)"))
+    .collect::<Vec<_>>()
+    .join(", ");
   let mut stmt = conn
-    .prepare(
-      "SELECT id, relpath, title, snippet(docs, 6, '**', '**', ' … ', 12) \
-       FROM docs WHERE docs MATCH ?1 ORDER BY rank LIMIT ?2",
-    )
+    .prepare(&format!(
+      "SELECT id, relpath, title, {spalten} FROM docs WHERE docs MATCH ?1 ORDER BY rank LIMIT ?2"
+    ))
     .map_err(|e| e.to_string())?;
   let rows = stmt
     .query_map(rusqlite::params![expr, limit as i64], |row| {
+      let mut feld = FELDER[0].1;
+      let mut ausschnitt = String::new();
+      for (n, (_, name)) in FELDER.iter().enumerate() {
+        let s: String = row.get(3 + n)?;
+        if s.contains("**") {
+          feld = name;
+          ausschnitt = s;
+          break;
+        }
+      }
       Ok(Hit {
         id: row.get(0)?,
         relpath: row.get(1)?,
         title: row.get(2)?,
-        snippet: row.get(3)?,
+        field: feld,
+        snippet: ausschnitt,
       })
     })
     .map_err(|e| format!("Suchausdruck „{query}“: {e}"))?;
@@ -162,7 +196,36 @@ mod tests {
     let hits = search(&home, "tracing", None, 10).unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].title, "ADR Logging");
+    assert_eq!(hits[0].field, "text");
     assert!(hits[0].snippet.contains("**tracing**"));
+  }
+
+  /// Woher der Treffer stammt, steht am Treffer: Nur ein Rumpf-Treffer hat
+  /// eine Stelle im Dokument; Titel und Schlagwort zeigen das Feld selbst.
+  #[test]
+  fn nennt_das_getroffene_feld() {
+    let home = archiv();
+    let titel = search(&home, "ADR", None, 10).unwrap();
+    assert_eq!(titel[0].field, "title");
+    assert!(titel[0].snippet.contains("**ADR**"), "{}", titel[0].snippet);
+
+    let tag = search(&home, "", Some("adr"), 10).unwrap();
+    assert_eq!(tag[0].field, "tags");
+  }
+
+  /// Rohdaten-Dateien sind mit ihrem Inhalt auffindbar; Binärformate
+  /// steuern nichts bei, auch wenn sie im Archiv liegen.
+  #[test]
+  fn findet_in_textdateien() {
+    let home = archiv();
+    fs::write(home.join("stack.yaml"), "dienste:\n  - kessel\n").unwrap();
+    fs::write(home.join("werte.json"), "{\"marke\": \"kessel\"}\n").unwrap();
+    fs::write(home.join("bild.png"), [0x89u8, 0x50, 0x4e, 0x47, 0x0d]).unwrap();
+
+    let hits = search(&home, "kessel", None, 10).unwrap();
+    let titel: Vec<_> = hits.iter().map(|h| h.title.as_str()).collect();
+    assert_eq!(titel, ["stack.yaml", "werte.json"], "{titel:?}");
+    assert!(hits[0].snippet.contains("**kessel**"), "{}", hits[0].snippet);
   }
 
   #[test]

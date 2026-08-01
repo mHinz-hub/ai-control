@@ -4,7 +4,7 @@
 // Leerzustände.
 import { describe, expect, it, vi } from "vitest";
 import type { EpubBook } from "./epub-view";
-import { initWikiView } from "./wiki-view";
+import { drawioLeer, initWikiView } from "./wiki-view";
 
 /// Minimalbuch für die Viewer-Zweige: eine Seite, kein Inhaltsverzeichnis.
 const BUCH: EpubBook = {
@@ -17,11 +17,14 @@ const BUCH: EpubBook = {
   toc: [],
 };
 
-function setup(pending: string | null = null) {
+function setup(pending: string | null = null, drawio = false, marks: string[] = []) {
   document.body.innerHTML = `<div id="w"></div>`;
   const readDoc = vi.fn(() => Promise.resolve("# Inhalt\n\nText mit [[neu]]."));
+  const readFile = vi.fn(() => Promise.resolve('{"a": 1}'));
   const writeDoc = vi.fn(() => Promise.resolve());
+  const writeFile = vi.fn(() => Promise.resolve());
   const openEpub = vi.fn(() => Promise.resolve(BUCH));
+  const openDrawio = vi.fn();
   const setTitle = vi.fn();
   const openWiki = vi.fn();
   const actions = {
@@ -29,13 +32,22 @@ function setup(pending: string | null = null) {
     createFolder: vi.fn(),
     createDoc: vi.fn(() => Promise.resolve("id-neu-doc")),
     createHtml: vi.fn(() => Promise.resolve("id-neu-html")),
+    createDrawio: vi.fn(() => Promise.resolve("skizze.drawio")),
+    createText: vi.fn(() => Promise.resolve("path:daten.json")),
+    importFiles: vi.fn(),
+    reveal: vi.fn(),
+    removeFolder: vi.fn(),
   };
   let pendingSelect = pending;
   const view = initWikiView(document.getElementById("w")!, {
     autoStart: true,
     readDoc,
+    readFile,
     writeDoc,
+    writeFile,
     openEpub,
+    drawioAvailable: () => drawio,
+    openDrawio,
     setTitle,
     openWiki,
     takePending: () => {
@@ -43,9 +55,12 @@ function setup(pending: string | null = null) {
       pendingSelect = null;
       return p;
     },
+    takeMarks: () => marks,
     actions,
   });
-  return { view, readDoc, writeDoc, openEpub, setTitle, openWiki, actions };
+  return {
+    view, readDoc, readFile, writeDoc, writeFile, openEpub, openDrawio, setTitle, openWiki, actions,
+  };
 }
 
 const doc = (relpath: string, name: string, extra: object = {}) => ({
@@ -76,20 +91,22 @@ const page = JSON.stringify({
           backlinks: 2,
           description: "Beschreibung",
         }),
-        // Knotentext des Ordners „konzepte" — jeder Knoten hat einen.
-        doc("konzepte.md", "konzepte", { title: "konzepte" }),
       ],
     },
     {
       name: "konzepte",
       docs: [
+        // Knotentext IM Ordner — jeder Knoten hat einen.
+        doc("konzepte/index.md", "index", { id: "id-konzepte", title: "konzepte" }),
         doc("konzepte/2026-07-19_1005-neu.md", "neu"),
-        doc("konzepte/panel.md", "panel", { title: "panel" }),
       ],
     },
     {
       name: "konzepte/panel",
-      docs: [doc("konzepte/panel/2026-07-19_1010-alt.md", "alt")],
+      docs: [
+        doc("konzepte/panel/index.md", "index", { id: "id-panel", title: "panel" }),
+        doc("konzepte/panel/2026-07-19_1010-alt.md", "alt"),
+      ],
     },
   ],
 });
@@ -103,25 +120,38 @@ const mergedPage = JSON.stringify({
   total: 2,
   tags: [],
   folders: [
-    { name: "", docs: [doc("konzepte.md", "konzepte", { title: "Konzepte" })] },
-    { name: "konzepte", docs: [doc("konzepte/2026-07-19_1005-neu.md", "neu")] },
+    { name: "", docs: [] },
+    {
+      name: "konzepte",
+      docs: [
+        doc("konzepte/index.md", "index", { id: "id-konzepte", title: "Konzepte" }),
+        doc("konzepte/2026-07-19_1005-neu.md", "neu"),
+      ],
+    },
   ],
 });
 
 const flush = () => new Promise((r) => setTimeout(r));
 
+/// Eintrag des offenen Kontext-/Anlege-Menüs mit dieser Beschriftung.
+const menuePunkt = (label: string) =>
+  [...document.querySelectorAll<HTMLElement>(".wiki-menu-item")].find(
+    (b) => b.textContent === label,
+  )!;
+
 describe("initWikiView — Baum", () => {
-  it("Baum zeigt Ordner und Dokumente, Wurzel ist gewählt", () => {
+  it("Baum zeigt nur Ordner, Wurzel ist gewählt", () => {
     const { view } = setup();
     view.set(page);
     expect(document.querySelector(".wiki-tree-root")!.className).toContain("active");
-    const rows = [...document.querySelectorAll(".wiki-tree .wiki-tree-name")].map(
+    const rows = [...document.querySelectorAll(".wiki-tree-children .wiki-tree-name")].map(
       (e) => e.textContent,
     );
-    // Unter jedem Knoten erst Dokumente, dann Ordner (mit Titel), sortiert.
-    expect(rows).toEqual(["WURZEL-DOC", "konzepte", "NEU", "panel", "ALT"]);
+    // Nur die Ordnerstruktur, sortiert — Dokumente stehen in der Übersicht.
+    expect(rows).toEqual(["konzepte", "panel"]);
     // Wurzel-Ansicht rechts: Titel + Kindzähler.
-    expect(document.querySelector(".wiki-note-title")!.textContent).toBe("Archiv");
+    // Die Wurzel ohne eigene Notiz trägt keinen Titel — der Ordnername steht im Baum.
+    expect(document.querySelector(".wiki-note-title")!.textContent).toBe("");
     expect(document.querySelector(".wiki-children-caption")!.textContent).toBe(
       "2 Dokumente",
     );
@@ -130,11 +160,11 @@ describe("initWikiView — Baum", () => {
   it("gleichnamiges Dokument verschmilzt mit dem Ordner zur Notiz", async () => {
     const { view, readDoc } = setup();
     view.set(mergedPage);
-    const rows = [...document.querySelectorAll(".wiki-tree .wiki-tree-name")].map(
+    const rows = [...document.querySelectorAll(".wiki-tree-children .wiki-tree-name")].map(
       (e) => e.textContent,
     );
     // Kein eigenes Blatt für konzepte.md — der Ordnerknoten trägt den Titel.
-    expect(rows).toEqual(["Konzepte", "NEU"]);
+    expect(rows).toEqual(["Konzepte"]);
     // Auswahl des Knotens zeigt Inhalt UND Kindliste.
     document.querySelector<HTMLElement>(".wiki-tree summary .wiki-tree-name")!.click();
     await flush();
@@ -150,7 +180,7 @@ describe("initWikiView — Notiz-Ansicht", () => {
   it("Dokument-Klick lädt den Body in die Notiz-Ansicht", async () => {
     const { view, readDoc } = setup();
     view.set(page);
-    document.querySelector<HTMLElement>(".wiki-tree-doc")!.click(); // WURZEL-DOC
+    document.querySelector<HTMLElement>(".wiki-doc-entry")!.click(); // WURZEL-DOC
     await flush();
     expect(readDoc).toHaveBeenCalledWith("id-wurzel-doc");
     expect(document.querySelector(".wiki-note-title")!.textContent).toBe("WURZEL-DOC");
@@ -166,7 +196,7 @@ describe("initWikiView — Notiz-Ansicht", () => {
   it("Wikilink im Inhalt wählt die Ziel-Notiz lokal aus", async () => {
     const { view, openWiki } = setup();
     view.set(page);
-    document.querySelector<HTMLElement>(".wiki-tree-doc")!.click(); // WURZEL-DOC
+    document.querySelector<HTMLElement>(".wiki-doc-entry")!.click(); // WURZEL-DOC
     await flush();
     document.querySelector<HTMLElement>(".wiki-note-body a.wiki")!.click();
     expect(openWiki).not.toHaveBeenCalled();
@@ -176,20 +206,17 @@ describe("initWikiView — Notiz-Ansicht", () => {
   it("Stift schaltet in den Editor, Speichern schreibt zurück", async () => {
     const { view, writeDoc } = setup();
     view.set(page);
-    document.querySelector<HTMLElement>(".wiki-tree-doc")!.click();
+    document.querySelector<HTMLElement>(".wiki-doc-entry")!.click();
     await flush();
     document.querySelector<HTMLElement>(".wiki-note-actions .panel-btn")!.click();
     await flush();
-    const area = document.querySelector<HTMLTextAreaElement>(".wiki-note-editor")!;
-    expect(area.value).toContain("# Inhalt");
-    // Vorschau rechts zeigt den gerenderten Rohtext.
+    // Rohtext links (CodeMirror), gerenderte Vorschau rechts.
+    const roh = document.querySelector(".wiki-note-editor .cm-content")!;
+    expect(roh.textContent).toContain("# Inhalt");
     expect(document.querySelector(".wiki-edit-preview h1")!.textContent).toBe("Inhalt");
-    area.value = "# Neu\n\nGeändert.";
-    area.dispatchEvent(new Event("input"));
-    expect(document.querySelector(".wiki-edit-preview h1")!.textContent).toBe("Neu");
     document.querySelector<HTMLElement>(".wiki-form-submit")!.click();
     await flush();
-    expect(writeDoc).toHaveBeenCalledWith("id-wurzel-doc", "# Neu\n\nGeändert.");
+    expect(writeDoc).toHaveBeenCalledWith("id-wurzel-doc", "# Inhalt\n\nText mit [[neu]].");
     // Nach dem Speichern wieder die Anzeige.
     expect(document.querySelector(".wiki-note-editor")).toBeNull();
     expect(document.querySelector(".wiki-note-body")).not.toBeNull();
@@ -198,7 +225,7 @@ describe("initWikiView — Notiz-Ansicht", () => {
   it("Abbrechen verwirft und zeigt wieder an", async () => {
     const { view, writeDoc } = setup();
     view.set(page);
-    document.querySelector<HTMLElement>(".wiki-tree-doc")!.click();
+    document.querySelector<HTMLElement>(".wiki-doc-entry")!.click();
     await flush();
     document.querySelector<HTMLElement>(".wiki-note-actions .panel-btn")!.click();
     await flush();
@@ -223,7 +250,8 @@ describe("initWikiView — Notiz-Ansicht", () => {
         folders: [{ name: "", docs: [doc("2026-07-19_1000-wurzel-doc.md", "wurzel-doc")] }],
       }),
     );
-    expect(document.querySelector(".wiki-note-title")!.textContent).toBe("Archiv");
+    // Die Wurzel ohne eigene Notiz trägt keinen Titel — der Ordnername steht im Baum.
+    expect(document.querySelector(".wiki-note-title")!.textContent).toBe("");
   });
 
   it("vorgemerkter Suchtreffer wählt die Notiz beim set() aus", async () => {
@@ -232,6 +260,19 @@ describe("initWikiView — Notiz-Ansicht", () => {
     await flush();
     expect(document.querySelector(".wiki-note-title")!.textContent).toBe("NEU");
     expect(readDoc).toHaveBeenCalledWith("id-neu");
+    // Ohne Wörter aus dem Treffer bleibt der Text unmarkiert.
+    expect(document.querySelector(".wiki-note-body mark")).toBeNull();
+  });
+
+  /// Der Sprung aus der Suche bringt die gefundenen Wörter mit; die Notiz
+  /// hebt sie hervor, sobald ihr Text geladen ist.
+  it("Suchtreffer markiert die Fundstellen in der Notiz", async () => {
+    const { view } = setup("id-neu", false, ["Inhalt"]);
+    view.set(page);
+    await flush();
+    const marken = document.querySelectorAll(".wiki-note-body mark.wiki-hit");
+    expect(marken).toHaveLength(1);
+    expect(marken[0].textContent).toBe("Inhalt");
   });
 });
 
@@ -253,8 +294,12 @@ describe("initWikiView — HTML-Notizen", () => {
     const view = initWikiView(document.getElementById("w")!, {
       autoStart: true,
       readDoc,
+      readFile: vi.fn(() => Promise.resolve("")),
       writeDoc: vi.fn(() => Promise.resolve()),
+      writeFile: vi.fn(() => Promise.resolve()),
       openEpub: vi.fn(() => Promise.resolve(BUCH)),
+      drawioAvailable: () => false,
+      openDrawio: vi.fn(),
       setTitle: vi.fn(),
       openWiki: vi.fn(),
       actions: {
@@ -262,10 +307,15 @@ describe("initWikiView — HTML-Notizen", () => {
         createFolder: vi.fn(),
         createDoc: vi.fn(() => Promise.resolve("")),
         createHtml: vi.fn(() => Promise.resolve("")),
+        createDrawio: vi.fn(() => Promise.resolve("")),
+        createText: vi.fn(() => Promise.resolve("")),
+        importFiles: vi.fn(),
+        reveal: vi.fn(),
+        removeFolder: vi.fn(),
       },
     });
     view.set(htmlPage);
-    document.querySelector<HTMLElement>(".wiki-tree-doc")!.click();
+    document.querySelector<HTMLElement>(".wiki-doc-entry")!.click();
     await flush();
     // Der Rumpf steht als Markup in der Ansicht — kein <p> aus Markdown.
     expect(document.querySelector(".wiki-note-body b")!.textContent).toBe("Text");
@@ -286,7 +336,17 @@ describe("initWikiView — HTML-Notizen", () => {
   it("öffnet Bücher im Viewer statt im Editor", async () => {
     const { view, openEpub, readDoc } = setup();
     view.set(buchSeite);
-    document.querySelector<HTMLElement>(".wiki-tree-doc")!.click();
+    // Kontextmenü der Übersichts-Zeile: für Bücher nur Löschen.
+    document
+      .querySelector<HTMLElement>(".wiki-doc-entry")!
+      .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    expect(
+      [...document.querySelectorAll<HTMLElement>(".wiki-menu-item")].map(
+        (i) => i.textContent,
+      ),
+    ).toEqual(["Dokument löschen"]);
+    document.querySelector(".wiki-menu")?.remove();
+    document.querySelector<HTMLElement>(".wiki-doc-entry")!.click();
     await flush();
     expect(openEpub).toHaveBeenCalledWith("id-tractatus");
     expect(readDoc).not.toHaveBeenCalled();
@@ -295,12 +355,112 @@ describe("initWikiView — HTML-Notizen", () => {
     // Kopf: nur Löschen, kein Stift; Titel nicht klickbar.
     expect(document.querySelector(".wiki-note-actions .panel-btn")!.textContent).not.toBe("✎");
     expect(document.querySelector(".wiki-note-title")!.className).not.toContain("editable");
+  });
 
+  const dateiSeite = JSON.stringify({
+    kind: "page",
+    home: "/tmp/archiv",
+    tag: null,
+    total: 1,
+    tags: [],
+    folders: [{ name: "", docs: [doc("daten.json", "daten", { kind: "file" })] }],
+  });
+
+  /// Eine sonstige Datei zeigt der Datei-Viewer: JSON als faltbarer Baum,
+  /// kein Bearbeiten, Titel nicht klickbar.
+  it("zeigt sonstige Dateien an, JSON als faltbaren Baum", async () => {
+    const { view, readFile, readDoc } = setup();
+    view.set(dateiSeite);
+    document.querySelector<HTMLElement>(".wiki-doc-entry")!.click();
+    await flush();
+    expect(readFile).toHaveBeenCalledWith("id-daten");
+    expect(readDoc).not.toHaveBeenCalled();
+    const baum = document.querySelector(".dt-root")!;
+    expect(baum.querySelector(".dt-key")!.textContent).toBe("a");
+    expect(baum.querySelector(".dt-num")!.textContent).toBe("1");
+    expect(document.querySelector(".wiki-note-title")!.className).not.toContain("editable");
+  });
+
+  /// Rohdaten-Dateien (JSON, YAML, XML, Klartext) lassen sich bearbeiten —
+  /// mit der Grammatik ihrer Endung und ohne Frontmatter beim Speichern.
+  it("Textdatei: Stift öffnet den Editor, Speichern schreibt die Datei", async () => {
+    const { view, writeFile } = setup();
+    view.set(dateiSeite);
+    document.querySelector<HTMLElement>(".wiki-doc-entry")!.click();
+    await flush();
+    const stift = [...document.querySelectorAll<HTMLElement>(".wiki-note-actions .panel-btn")].find(
+      (b) => b.textContent === "✎",
+    )!;
+    expect(stift).not.toBeNull();
+    stift.click();
+    await flush();
+    expect(document.querySelector(".wiki-note-editor .cm-content")!.textContent).toContain('"a"');
+    document.querySelector<HTMLElement>(".wiki-form-submit")!.click();
+    await flush();
+    expect(writeFile).toHaveBeenCalledWith("id-daten", '{"a": 1}');
+  });
+
+  const diagrammSeite = JSON.stringify({
+    kind: "page",
+    home: "/tmp/archiv",
+    tag: null,
+    total: 1,
+    tags: [],
+    folders: [{ name: "", docs: [doc("skizze.drawio", "skizze", { kind: "file" })] }],
+  });
+
+  /// Mit installierter draw.io-Desktop-App trägt das Diagramm den
+  /// Editier-Knopf; der Klick öffnet die Datei dort.
+  it("Diagramm-Knopf öffnet draw.io, wenn installiert", () => {
+    const { view, openDrawio } = setup(null, true);
+    view.set(diagrammSeite);
+    document.querySelector<HTMLElement>(".wiki-doc-entry")!.click();
+    const knopf = document.querySelector<HTMLElement>(".wiki-drawio-edit")!;
+    expect(knopf).not.toBeNull();
+    knopf.click();
+    expect(openDrawio).toHaveBeenCalledWith("id-skizze");
+    expect(document.querySelector(".wiki-note-drawio")).not.toBeNull();
+  });
+
+  /// Der Leer-Test entscheidet, ob der Viewer läuft oder der Platzhalter
+  /// „leeres Diagramm" steht: gezeichnete Dateien müssen durch, auch die
+  /// komprimiert gespeicherten.
+  it("erkennt gefüllte Diagramme, auch komprimiert gespeicherte", () => {
+    const leer =
+      '<mxfile><diagram id="d1" name="Seite-1"><mxGraphModel><root>' +
+      '<mxCell id="0"/><mxCell id="1" parent="0"/>' +
+      "</root></mxGraphModel></diagram></mxfile>";
+    const gezeichnet =
+      '<mxfile host="Electron"><diagram id="d1" name="Seite-1"><mxGraphModel dx="800" dy="600"><root>' +
+      '<mxCell id="0"/><mxCell id="1" parent="0"/>' +
+      '<mxCell id="2" value="A" style="rounded=0;" vertex="1" parent="1">' +
+      '<mxGeometry x="360" y="200" width="120" height="60" as="geometry"/></mxCell>' +
+      "</root></mxGraphModel></diagram></mxfile>";
+    const gepackt =
+      '<mxfile host="Electron"><diagram id="d1" name="Seite-1">' +
+      "7VpNc+I4EP01HJPCBpMcE0IyszXZTS2ZmtkjWA3WRJa8kkxgfv22bBmMTQiZzWx2" +
+      "</diagram></mxfile>";
+    expect(drawioLeer(leer)).toBe(true);
+    expect(drawioLeer(gezeichnet)).toBe(false);
+    expect(drawioLeer(gepackt)).toBe(false);
+  });
+
+  it("ohne draw.io-Installation fehlt der Editier-Knopf", () => {
+    const { view } = setup();
+    view.set(diagrammSeite);
+    document.querySelector<HTMLElement>(".wiki-doc-entry")!.click();
+    expect(document.querySelector(".wiki-drawio-edit")).toBeNull();
+  });
+
+  it("Kontextmenü bietet den Datei-Import unter dem Knoten an", () => {
+    const { view, actions } = setup();
+    view.set(mergedPage);
     document
-      .querySelector<HTMLElement>(".wiki-tree-doc")!
+      .querySelector<HTMLElement>(".wiki-tree summary")!
       .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
     const items = [...document.querySelectorAll<HTMLElement>(".wiki-menu-item")];
-    expect(items.map((i) => i.textContent)).toEqual(["Dokument löschen"]);
+    items.find((i) => i.textContent === "Dateien hinzufügen …")!.click();
+    expect(actions.importFiles).toHaveBeenCalledWith("id-konzepte");
   });
 
   it("Kontextmenü legt HTML-Notizen unter dem Knoten an", () => {
@@ -360,7 +520,7 @@ describe("initWikiView — Zurück", () => {
   it("Zurück-Knopf führt zur vorherigen Auswahl", async () => {
     const { view } = setup();
     view.set(page);
-    document.querySelector<HTMLElement>(".wiki-tree-doc")!.click(); // WURZEL-DOC
+    document.querySelector<HTMLElement>(".wiki-doc-entry")!.click(); // WURZEL-DOC
     await flush();
     document.querySelector<HTMLElement>(".wiki-tree summary .wiki-tree-name")!.click(); // konzepte
     expect(document.querySelector(".wiki-note-title")!.textContent).toBe("konzepte");
@@ -368,7 +528,8 @@ describe("initWikiView — Zurück", () => {
     await flush();
     expect(document.querySelector(".wiki-note-title")!.textContent).toBe("WURZEL-DOC");
     document.querySelector<HTMLElement>(".wiki-note-back")!.click();
-    expect(document.querySelector(".wiki-note-title")!.textContent).toBe("Archiv");
+    // Die Wurzel ohne eigene Notiz trägt keinen Titel — der Ordnername steht im Baum.
+    expect(document.querySelector(".wiki-note-title")!.textContent).toBe("");
     // Verlauf leer: Knopf deaktiviert.
     expect(
       document.querySelector<HTMLButtonElement>(".wiki-note-back")!.disabled,
@@ -380,7 +541,7 @@ describe("initWikiView — Aktionen", () => {
   it("Klick auf den Titel bearbeitet ihn, Enter setzt den Frontmatter-Titel", async () => {
     const { view, setTitle } = setup();
     view.set(page);
-    document.querySelector<HTMLElement>(".wiki-tree-doc")!.click();
+    document.querySelector<HTMLElement>(".wiki-doc-entry")!.click();
     await flush();
     document.querySelector<HTMLElement>(".wiki-note-title.editable")!.click();
     const input = document.querySelector<HTMLInputElement>(".wiki-note-title-input")!;
@@ -393,7 +554,7 @@ describe("initWikiView — Aktionen", () => {
   it("Escape verwirft die Titel-Bearbeitung", async () => {
     const { view, setTitle } = setup();
     view.set(page);
-    document.querySelector<HTMLElement>(".wiki-tree-doc")!.click();
+    document.querySelector<HTMLElement>(".wiki-doc-entry")!.click();
     await flush();
     document.querySelector<HTMLElement>(".wiki-note-title.editable")!.click();
     const input = document.querySelector<HTMLInputElement>(".wiki-note-title-input")!;
@@ -405,7 +566,7 @@ describe("initWikiView — Aktionen", () => {
   it("Löschen meldet mit relpath", async () => {
     const { view, actions } = setup();
     view.set(page);
-    document.querySelector<HTMLElement>(".wiki-tree-doc")!.click();
+    document.querySelector<HTMLElement>(".wiki-doc-entry")!.click();
     await flush();
     document.querySelector<HTMLElement>(".wiki-note-actions .cmd-del")!.click();
     expect(actions.remove).toHaveBeenCalledWith("id-wurzel-doc");
@@ -415,7 +576,9 @@ describe("initWikiView — Aktionen", () => {
     const { view, actions } = setup();
     view.set(page);
     document.querySelector<HTMLElement>(".wiki-tree summary .wiki-tree-name")!.click();
+    // Das Plus öffnet ein Menü (Ordner, Dokument, HTML-Notiz, Dateien).
     document.querySelector<HTMLElement>(".wiki-note-actions .wiki-add")!.click();
+    menuePunkt("Neues Dokument").click();
     const form = document.querySelector<HTMLElement>(".wiki-form")!;
     expect(form.querySelector(".wiki-form-title")!.textContent).toBe("Neues Dokument");
     const input = form.querySelector<HTMLInputElement>("input")!;
@@ -429,10 +592,12 @@ describe("initWikiView — Aktionen", () => {
     const { view, actions } = setup();
     view.set(page);
     document.querySelector<HTMLElement>(".wiki-note-actions .wiki-add")!.click();
+    menuePunkt("Neues Dokument").click();
     document.querySelector<HTMLElement>(".wiki-form-cancel")!.click();
     expect(document.querySelector(".wiki-form")).toBeNull();
 
     document.querySelector<HTMLElement>(".wiki-note-actions .wiki-add")!.click();
+    menuePunkt("Neues Dokument").click();
     document
       .querySelector<HTMLElement>(".wiki-form")!
       .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
@@ -460,7 +625,7 @@ describe("initWikiView — Aktionen", () => {
     const { view, actions } = setup();
     view.set(page);
     document
-      .querySelector<HTMLElement>(".wiki-tree-doc")!
+      .querySelector<HTMLElement>(".wiki-doc-entry")!
       .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
     const items = [...document.querySelectorAll<HTMLElement>(".wiki-menu-item")];
     items.find((i) => i.textContent === "Dokument löschen")!.click();

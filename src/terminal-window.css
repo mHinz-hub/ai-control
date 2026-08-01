@@ -107,6 +107,20 @@ header .panel-tabs[hidden] {
   display: flex;
   align-self: stretch;
 }
+/* Desktop mit Knöpfen links (GNOME/KDE/XFCE-Einstellung): Gruppe an den
+   Anfang der Kopfleiste, Reihenfolge gespiegelt — Schließen ganz außen. */
+/* Knöpfe links: Der Titel rückt von der Knopfgruppe ab, und rechts bleibt
+   Rand — sonst klebt die Tab-Leiste an der Fensterkante. */
+:root[data-winbtns="left"] header {
+  padding-left: 0;
+  padding-right: 12px;
+}
+:root[data-winbtns="left"] #winbtns {
+  order: -1;
+  margin-left: 0;
+  margin-right: 12px;
+  flex-direction: row-reverse;
+}
 
 .winbtn {
   width: 44px;
@@ -216,7 +230,10 @@ header .panel-tabs[hidden] {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  padding: 12px 4px 12px 14px;
+  /* Rechts genug Luft, dass der Scrollbalken des Terminals nicht an der
+     4 px breiten Zieh-Zone der Fensterkante klebt — sonst springt der Zeiger
+     beim Zielen zwischen Scrollen und Fenstergröße. */
+  padding: 12px 12px 12px 14px;
 }
 #term .xterm-viewport::-webkit-scrollbar {
   width: 8px;
@@ -268,8 +285,9 @@ header .panel-tabs[hidden] {
   gap: 2px;
   min-width: 0;
 }
-/* Ablösen/Ausblenden rechts in der Titelzeile — in jedem Modus da. */
-#panel-detach {
+/* Ausblenden rechts in der Titelzeile. Der Ablösen-Knopf davor ist dauerhaft
+   versteckt — der Abstandshalter muss deshalb am Ausblenden-Knopf hängen. */
+#panel-hide {
   margin-left: auto;
 }
 .panel-actions {
@@ -383,6 +401,12 @@ header .panel-tabs[hidden] {
   font-size: 13px;
   line-height: 1.55;
 }
+/* Das angedockte Panel liegt an der rechten Fensterkante — sein Scrollbalken
+   hält Abstand zur Zieh-Zone. */
+:root[data-platform="other"] #panel-content {
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
 #panel-content::-webkit-scrollbar {
   width: 8px;
 }
@@ -446,8 +470,66 @@ header .panel-tabs[hidden] {
 #panel-content.md a {
   color: var(--accent);
 }
+/* Wie im abgelösten Fenster: Ränder und linksbündiger Kopf, damit Spalten
+   und Überschriften in einer Flucht stehen. */
+#panel-content.md table {
+  border-collapse: collapse;
+  margin: 0 0 0.7em;
+}
+#panel-content.md td,
+#panel-content.md th {
+  border: 1px solid var(--line-strong);
+  padding: 5px 9px;
+  vertical-align: top;
+}
+#panel-content.md th {
+  background: var(--surface);
+}
+#panel-content.md th:not([align]) {
+  text-align: left;
+}
 .panel-btn[hidden],
 .panel-lang[hidden],
 #panel-content[hidden] {
   display: none;
+}
+/* Druck („Drucken / als PDF speichern"): nur der Dokumentinhalt des Panels,
+   schwarz auf weiß. Die Theme-Variablen kommen als Inline-Style von applyTheme,
+   darum !important. */
+@media print {
+  :root {
+    --bg: #fff !important;
+    --surface: #fff !important;
+    --tile: #f2f2f2 !important;
+    --line: #ddd !important;
+    --line-strong: #bbb !important;
+    --text: #000 !important;
+    --muted: #333 !important;
+    --faint: #666 !important;
+    --accent: #1a4fa0 !important;
+  }
+  header,
+  #term,
+  #splitter,
+  #resize-grips,
+  .panel-head {
+    display: none !important;
+  }
+  /* Block- statt Flex-Fluss: Flex-Container paginieren in WebKit nicht
+     zuverlässig über die erste Seite hinaus. */
+  html,
+  body,
+  #body {
+    display: block;
+    height: auto;
+    overflow: visible;
+    border: none !important;
+  }
+  #panel {
+    display: block;
+    width: auto;
+  }
+  #panel-content {
+    overflow: visible;
+  }
 }

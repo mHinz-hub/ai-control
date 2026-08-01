@@ -43,6 +43,14 @@ const win = getCurrentWebviewWindow();
 // im Header (Linux ist dekorationslos, siehe terminal.rs).
 const isMac = /Mac|Macintosh/.test(navigator.userAgent);
 document.documentElement.dataset.platform = isMac ? "mac" : "other";
+// Seite der Fensterknöpfe folgt dem Desktop (GNOME/Cinnamon, KDE, XFCE). Das
+// Flag steuert die eigene Knopfgruppe; macOS zeichnet die Ampel selbst und
+// reserviert ihr über data-platform Platz — dort bleibt es ungesetzt.
+if (!isMac) {
+  void invoke<boolean>("window_buttons_left").then((links) => {
+    if (links) document.documentElement.dataset.winbtns = "left";
+  });
+}
 if (!isMac) {
   document
     .getElementById("win-min")
@@ -166,6 +174,13 @@ term.attachCustomKeyEventHandler((e) => {
 await document.fonts.load(`${fontSize}px "JetBrains Mono"`);
 await document.fonts.load(`600 ${fontSize}px "JetBrains Mono"`);
 term.open(document.getElementById("term")!);
+// Einfügen übers Rechtsklick-Menü kam doppelt an: xterms paste-Handler
+// schickt den Text in die PTY, lässt aber das Default-Einfügen ins Textarea
+// zu (kein preventDefault) — WebKitGTK erzeugt daraus ein input-Event mit
+// insertText ohne Tastendruck, das xterm als zweite Eingabe wertet. Das
+// preventDefault hier unterbindet den zweiten Weg; xterms stopPropagation
+// blockiert Listener am selben Element nicht.
+term.textarea!.addEventListener("paste", (e) => e.preventDefault());
 // Reihenfolge laut Addon-Doku: Ligaturen vor WebGL aktivieren.
 term.loadAddon(new LigaturesAddon());
 term.loadAddon(new WebglAddon());
