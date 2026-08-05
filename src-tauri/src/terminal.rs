@@ -563,6 +563,20 @@ pub fn panel_set(project: String, text: String) -> Result<(), String> {
   }
 }
 
+/// Verwirft den Entwurf: Quell-Verknüpfung lösen, dann den Puffer leeren.
+/// In dieser Reihenfolge, damit das Leeren nicht als Body in die verknüpfte
+/// Archiv-Datei zurückläuft — die Notiz behält ihren Inhalt. Der Watcher
+/// meldet den leeren Puffer als `panel-update` an alle Fenster.
+#[tauri::command]
+pub fn panel_clear(project: String) -> Result<(), String> {
+  match std::fs::remove_file(panel_source_file(&project)) {
+    Ok(()) => {}
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+    Err(e) => return Err(e.to_string()),
+  }
+  std::fs::write(panel_file(&project), "").map_err(|e| e.to_string())
+}
+
 /// Lädt ein Archiv-Dokument in den Dokument-Puffer (Treffer-Klick in der
 /// Suche) — ohne Frontmatter-Block, wie ein frischer Entwurf — und setzt die
 /// Quell-Verknüpfung fürs Zurückschreiben. Der Watcher meldet den neuen
@@ -581,7 +595,7 @@ pub fn panel_load(project: String, path: String) -> Result<(), String> {
 #[tauri::command]
 pub fn search_run(project: String, query: String, tag: Option<String>) -> Result<(), String> {
   let home = crate::domain::archive::require_archive_home(&project)?;
-  let hits = crate::domain::archive_search::search(&home, &query, tag.as_deref(), 20)?;
+  let hits = crate::domain::archive_search::search(&project, &home, &query, tag.as_deref())?;
   let payload = serde_json::json!({
     "query": query,
     "tag": tag,
@@ -589,6 +603,24 @@ pub fn search_run(project: String, query: String, tag: Option<String>) -> Result
     "hits": hits,
   });
   std::fs::write(search_file(&project), payload.to_string()).map_err(|e| e.to_string())
+}
+
+/// Fundstellen eines Treffers: alle Vorkommen im Dokument bzw. Kapitel, je
+/// mit Druckseite und Lage. Getrennt vom Suchlauf — geholt wird erst, wer die
+/// Kachel aufklappt.
+#[tauri::command]
+pub fn search_spots(
+  project: String,
+  id: String,
+  teil: String,
+  query: String,
+) -> Result<Vec<crate::domain::archive_search::Stelle>, String> {
+  let home = crate::domain::archive::require_archive_home(&project)?;
+  let conn = crate::domain::search_index::oeffne(&crate::domain::search_index::index_pfad(
+    &project,
+  ))?;
+  crate::domain::search_index::abgleichen(&conn, &home)?;
+  crate::domain::archive_search::stellen(&conn, &id, &teil, &query)
 }
 
 /// Öffnet ein Wiki-Ziel: `tag:x` → Schlagwort-Seite, `tag:` →
@@ -776,6 +808,60 @@ pub fn archive_read_file(project: String, id: String) -> Result<String, String> 
   let path = crate::domain::archive_ops::file_path(&home, &relpath)?;
   let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
   String::from_utf8(bytes).map_err(|_| format!("keine Textdatei: {relpath}"))
+}
+
+/// Liest ein Bild aus dem Archiv als `data:`-Adresse — Vorschau in der Liste
+/// und Inhalt des Bildfensters.
+///
+/// Als Adresse statt als Bytes: so hängt sie unverändert an einem `<img>`, in
+/// der Liste wie im eigenen Fenster, ohne ein weiteres URI-Schema und ohne
+/// Umweg über die Platte. Die Ausschnitte eines Bandes wiegen einige Kilobyte;
+/// größere Bilder gehören nicht in eine Liste.
+#[tauri::command]
+pub fn archive_image(project: String, id: String) -> Result<String, String> {
+  use base64::Engine as _;
+  let home = crate::domain::archive::require_archive_home(&project)?;
+  let relpath = rel_of(&home, &id)?;
+  let path = crate::domain::archive_ops::file_path(&home, &relpath)?;
+  let typ = crate::domain::archive_ops::bild_mime(&path)
+    .ok_or_else(|| format!("kein Bild: {relpath}"))?;
+  let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+  let daten = base64::engine::general_purpose::STANDARD.encode(bytes);
+  Ok(format!("data:{typ};base64,{daten}"))
+}
+
+/// Was in einem Query-Wert stehen darf; alles andere wird zu `%XX`. Die ID
+/// einer Archiv-Datei ist ihr Pfad, und der trägt Leerzeichen und Umlaute.
+fn frage_escape(wert: &str) -> String {
+  wert
+    .bytes()
+    .map(|b| match b {
+      b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' | b':' => {
+        (b as char).to_string()
+      }
+      _ => format!("%{b:02X}"),
+    })
+    .collect()
+}
+
+/// Öffnet ein Bild des Archivs in einem eigenen Fenster.
+#[tauri::command]
+pub async fn open_image_window(
+  app: AppHandle,
+  project: String,
+  id: String,
+) -> Result<(), String> {
+  // Ein Fenster je Bild: zwei Ausschnitte nebeneinander zu sehen ist beim
+  // Nachschneiden der halbe Zweck der Sache.
+  let label = format!("bild-{project}-{}", id.replace(|c: char| !c.is_alphanumeric(), "_"));
+  if let Some(w) = app.get_webview_window(&label) {
+    let _ = w.set_focus();
+    return Ok(());
+  }
+  let cfg = project_config(&project)?;
+  let theme = cfg.terminal.theme.unwrap_or_default();
+  let url = format!("bild.html?project={project}&theme={theme}&id={}", frage_escape(&id));
+  open_project_window(&app, &project, &label, url, "Bild", (900.0, 700.0)).await
 }
 
 /// Kopiert gewählte Dateien in den Ordner des Knotens `parent` (Datei-Dialog
@@ -1099,7 +1185,14 @@ pub async fn open_panel_window(
   project: String,
   mode: Option<String>,
 ) -> Result<(), String> {
-  let label = format!("panel-{project}");
+  // Zwei Flächen, zwei Fenster: das Archiv (Wiki und Suche) und die Sitzung
+  // (Entwurf, Befehle, Aufgaben). Beide dürfen nebeneinander stehen — wer im
+  // Archiv liest, will die Befehlsliste nicht dafür schließen.
+  let flaeche = match mode.as_deref() {
+    Some("wiki") | Some("search") => "archiv",
+    _ => "sitzung",
+  };
+  let label = format!("panel-{flaeche}-{project}");
   if let Some(w) = app.get_webview_window(&label) {
     // Fenster steht schon: nach vorn holen und auf den gewünschten Tab
     // schalten (Archiv-/Such-Öffner im Terminal-Header).
@@ -1114,10 +1207,11 @@ pub async fn open_panel_window(
   // Der beim Ablösen aktive Tab geht als URL-Parameter mit — das neue
   // Fenster startet dort, statt in seiner Default-Ansicht.
   let url = match &mode {
-    Some(m) => format!("panel.html?project={project}&mode={m}"),
-    None => format!("panel.html?project={project}"),
+    Some(m) => format!("panel.html?project={project}&flaeche={flaeche}&mode={m}"),
+    None => format!("panel.html?project={project}&flaeche={flaeche}"),
   };
-  open_project_window(&app, &project, &label, url, "Dokument", (1280.0, 900.0)).await
+  let titel = if flaeche == "archiv" { "Archiv" } else { "Sitzung" };
+  open_project_window(&app, &project, &label, url, titel, (1280.0, 900.0)).await
 }
 
 /// Debug: JS-Fehler aus dem Terminal-Fenster ins Dev-Log.

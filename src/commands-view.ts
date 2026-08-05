@@ -131,6 +131,8 @@ export interface ModeTab {
   /// Titelzeilen-Text, wenn der Tab aktiv ist (der Entwurfs-Tab behält
   /// seinen Dokument-Titel).
   label: string;
+  /// Ein-Buchstaben-Form: der Tab trägt sie, solange er nicht aktiv ist.
+  kurz?: string;
   onActivate?: () => void;
 }
 
@@ -147,11 +149,21 @@ export function initPanelMode(opts: {
   // `null` = kein Tab aktiv (Panel zugeklappt).
   let mode: PanelMode | null = "draft";
   let draftTitle = "";
+  /// Breite des längsten Sitzungs-Tab-Wortes; steht erst nach dem Messen.
+  let aktivBreite = 0;
 
   function apply() {
     for (const tab of opts.tabs) {
       if (tab.content) tab.content.hidden = mode !== tab.mode;
-      tab.btn.classList.toggle("active", tab.mode === mode);
+      const aktiv = tab.mode === mode;
+      tab.btn.classList.toggle("active", aktiv);
+      // Sitzungs-Tabs: der aktive schreibt sich aus, die anderen stehen als
+      // Buchstabe da und nennen ihren Namen im Hover.
+      if (tab.kurz) {
+        tab.btn.textContent = aktiv ? tab.label : tab.kurz;
+        tab.btn.title = tab.label;
+        if (aktivBreite) tab.btn.style.width = aktiv ? `${aktivBreite}px` : "2em";
+      }
     }
     for (const el of opts.draftEls) el.hidden = mode !== "draft";
     const active = opts.tabs.find((tab) => tab.mode === mode);
@@ -182,5 +194,25 @@ export function initPanelMode(opts: {
     });
   }
   apply();
+
+  // Einmal beim Laden das längste der Wörter messen — diese Breite trägt der
+  // jeweils aktive Tab, die übrigen 2em. Die Leiste ist damit in jeder
+  // Auswahl gleich breit. Gemessen wird, sobald die Schrift da ist; vorher
+  // fiele die Messung auf die Ersatzschrift.
+  void document.fonts.ready.then(() => {
+    for (const tab of opts.tabs) {
+      if (!tab.kurz) continue;
+      const text = tab.btn.textContent;
+      const versteckt = tab.btn.hidden;
+      tab.btn.hidden = false;
+      tab.btn.style.width = "";
+      tab.btn.textContent = tab.label;
+      aktivBreite = Math.max(aktivBreite, tab.btn.offsetWidth);
+      tab.btn.textContent = text;
+      tab.btn.hidden = versteckt;
+    }
+    apply();
+  });
+
   return { to, clear, current: () => mode };
 }

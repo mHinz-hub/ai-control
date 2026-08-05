@@ -28,6 +28,8 @@ export async function wirePanel(
   project: string,
   onIncoming?: () => void,
   standalone = false,
+  /// Welche Fläche ein abgelöstes Fenster zeigt: „archiv" oder „sitzung".
+  flaeche = "archiv",
 ): Promise<PanelWiring> {
   const titleEl = document.querySelector(".panel-title") as HTMLElement;
   const [enabled, defaultLang, draft] = await Promise.all([
@@ -35,12 +37,12 @@ export async function wirePanel(
     invoke<string>("spellcheck_lang"),
     invoke<string>("buffer_read", { project, buffer: "panel" }),
   ]);
-  // Feste Aufgabenteilung: Session-Tabs (ToDo, Befehle) leben im angedockten
-  // Panel, Archiv-Tabs (popupOnly: Archiv, Suche) im eigenen Panel-Fenster.
-  // Im Dock erscheinen die Archiv-Tabs nur als Öffner-Knöpfe (terminal.ts
-  // fängt den Klick und öffnet das Fenster).
+  // Zwei Flächen: das Archiv (Wiki, Suche) und die Sitzung (Entwurf, Befehle,
+  // Aufgaben). Angedockt zeigt das Panel die Sitzung und die Archiv-Tabs als
+  // Öffner-Knöpfe (terminal.ts fängt den Klick). Abgelöst zeigt ein Fenster
+  // genau eine der beiden Flächen — beide dürfen nebeneinander stehen.
   const tabs = PANEL_TABS.filter((tab) => enabled.includes(tab.module)).filter(
-    (tab) => (standalone ? !!tab.popupOnly : true),
+    (tab) => (!standalone ? true : flaeche === "archiv" ? !!tab.popupOnly : !tab.popupOnly),
   );
 
   // Ohne Archiv-Modul (abgewählt oder kein Archiv-Home) verschwinden auch
@@ -94,6 +96,33 @@ export async function wirePanel(
   /// Tabs mit eigener Ansicht in DIESER Fläche (Öffner-Knöpfe zählen nicht).
   const activeTabs: typeof tabs = [];
   let anchor = document.getElementById("panel-content")!;
+
+  // Der Entwurf ist auf der Sitzungsfläche ein Reiter wie ToDo und Befehle —
+  // sonst führte der Weg zu den ToDos vom Entwurf weg, ohne zurück. Seine
+  // Ansicht hängt an den draftEls, einen Container braucht er nicht. Er zeigt
+  // sich, sobald es einen Entwurf gibt; ohne Entwurf bleibt sein Platz stehen
+  // (`visibility` statt `hidden`), damit die Leiste ihre Breite behält.
+  const sitzung = !standalone || flaeche === "sitzung";
+  let entwurfBtn: HTMLButtonElement | null = null;
+  /// Reiter zeigen oder seinen Platz leer stehen lassen.
+  const entwurfZeigen = (da: boolean) => {
+    if (entwurfBtn) entwurfBtn.style.visibility = da ? "" : "hidden";
+  };
+  if (sitzung) {
+    entwurfBtn = document.createElement("button");
+    entwurfBtn.className = "panel-btn";
+    entwurfBtn.dataset.mode = "draft";
+    entwurfBtn.textContent = t("panel.tabEntwurf");
+    entwurfZeigen(!!draft.trim());
+    tabsEl.append(entwurfBtn);
+    modeTabs.push({
+      mode: "draft",
+      btn: entwurfBtn,
+      content: null,
+      label: t("panel.tabEntwurf"),
+      kurz: t("panel.tabEntwurfKurz"),
+    });
+  }
   for (const [i, tab] of tabs.entries()) {
     const btn = document.createElement("button");
     btn.className = "panel-btn";
@@ -128,6 +157,7 @@ export async function wirePanel(
       btn,
       content,
       label: t(tab.labelKey),
+      kurz: tab.kurzKey ? t(tab.kurzKey) : undefined,
       onActivate: tab.onActivate
         ? () => tab.onActivate!(views.get(tab.mode)!, ctx)
         : undefined,
@@ -155,11 +185,33 @@ export async function wirePanel(
     .getElementById("panel-wiki-jump")!
     .addEventListener("click", () => openWiki("tag:"));
 
+  // Lese-Flächen: die Archiv-Tabs (Wiki, Suche). Sie leben im eigenen Fenster,
+  // und dort darf ein hereinkommender Entwurf den Baum nicht wegreißen.
+  const leseModi = new Set(PANEL_TABS.filter((tab) => tab.popupOnly).map((tab) => tab.mode));
+
   view.set(draft);
   await listen<string>("panel-update", (e) => {
     // Erst umschalten, dann setzen: to("draft") restauriert den gemerkten
     // Titel — der neue Inhalt (und damit sein Titel) muss danach kommen.
-    mode.to("draft");
+    // Auf der Sitzungsfläche (Dock, abgelöste Sitzung) gewinnt der Entwurf:
+    // wer einen Text ins Panel schreibt, will ihn sehen, auch wenn zuletzt
+    // ToDos oder Befehle offen standen. Im Archiv-Fenster bleibt der Leser.
+    // Der Reiter folgt dem Entwurf: Text da, Reiter da — verworfener Entwurf
+    // (leerer Puffer) nimmt ihn wieder mit, und die Ansicht geht zu den
+    // Aufgaben, damit die Fläche nicht leer stehen bleibt.
+    const leer = !e.payload.trim();
+    entwurfZeigen(!leer);
+    if (leer) {
+      view.set(e.payload);
+      if (mode.current() === "draft") {
+        const zurueck = ["todo", "commands"].find((m) => views.has(m));
+        if (zurueck) mode.to(zurueck);
+        else mode.clear();
+      }
+      return;
+    }
+    const jetzt = mode.current();
+    if (!leseModi.has(jetzt ?? "")) mode.to("draft");
     view.set(e.payload);
     onIncoming?.();
   });

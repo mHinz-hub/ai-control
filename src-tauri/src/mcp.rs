@@ -652,7 +652,7 @@ fn call_search(req: &Value) -> Value {
   let args = &req["params"]["arguments"];
   let query = args["query"].as_str().unwrap_or("");
   let tag = args["tag"].as_str();
-  let hits = match crate::domain::archive_search::search(&home, query, tag, 20) {
+  let hits = match crate::domain::archive_search::search(&project, &home, query, tag) {
     Ok(hits) => hits,
     Err(e) => return err(format!("Suche fehlgeschlagen: {e}")),
   };

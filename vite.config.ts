@@ -20,6 +20,7 @@ export default defineConfig(async () => ({
         popup: new URL("./popup.html", import.meta.url).pathname,
         panel: new URL("./panel.html", import.meta.url).pathname,
         commit: new URL("./commit.html", import.meta.url).pathname,
+        bild: new URL("./bild.html", import.meta.url).pathname,
       },
     },
   },

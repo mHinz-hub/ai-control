@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <title data-i18n="image.window">Bild</title>
+  </head>
+  <body>
+    <div class="panel-topbar" data-tauri-drag-region>
+      <span class="bild-heading" id="heading" data-tauri-drag-region></span>
+      <div class="bild-zoom">
+        <button class="panel-btn" id="kleiner" data-i18n-aria="image.smaller">−</button>
+        <span class="bild-faktor" id="faktor">100 %</span>
+        <button class="panel-btn" id="groesser" data-i18n-aria="image.larger">+</button>
+        <button class="panel-btn" id="passend" data-i18n="image.fit">Einpassen</button>
+        <button class="panel-btn" id="karo" data-i18n-aria="image.checker">▦</button>
+      </div>
+      <div class="zoom-anker" id="zoom-anker"></div>
+      <button class="winbtn osctl" id="win-min" data-i18n-aria="panel.minimize">
+        <svg width="12" height="12" viewBox="0 0 12 12"><line x1="2" y1="6.5" x2="10" y2="6.5" /></svg>
+      </button>
+      <button class="winbtn osctl" id="win-max" data-i18n-aria="panel.maximize">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="2.5" y="2.5" width="7" height="7" rx="1" /></svg>
+      </button>
+      <button class="winbtn close" id="win-close" data-i18n-aria="panel.close">
+        <svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" /></svg>
+      </button>
+    </div>
+    <div class="bild-buehne" id="buehne">
+      <img class="bild" id="bild" alt="" />
+    </div>
+    <footer class="bild-fuss">
+      <span class="bild-pfad" id="pfad"></span>
+      <span class="bild-masse" id="masse"></span>
+    </footer>
+    <div id="resize-grips" aria-hidden="true">
+      <div class="grip n" data-dir="North"></div>
+      <div class="grip s" data-dir="South"></div>
+      <div class="grip w" data-dir="West"></div>
+      <div class="grip e" data-dir="East"></div>
+      <div class="grip nw" data-dir="NorthWest"></div>
+      <div class="grip ne" data-dir="NorthEast"></div>
+      <div class="grip sw" data-dir="SouthWest"></div>
+      <div class="grip se" data-dir="SouthEast"></div>
+    </div>
+    <script type="module" src="/src/bild.ts"></script>
+  </body>
+</html>

@@ -12,6 +12,7 @@ Pool, project, and session management for [Claude Code](https://claude.com/claud
 
 - **Several logins, one click apart** — keep separate Claude Code logins side by side (subscription accounts or API keys) and give every project the one it should run under. Each project starts with its own login; no re-login, no juggling environment variables. An existing login in `~/.claude` is picked up as a pool of its own, so nothing has to be set up twice.
 - **Command history** — every shell command the assistant hands you lands beside the terminal as a copyable tile, with the session's full command history one click away.
+- **Todo list** — tasks the assistant is asked to remember outlive the session as tiles with note and due-date traffic light; they can be added and edited in the panel as well.
 - **Text panel** — Markdown drafts appear next to the terminal instead of scrolling past in the chat: readable, selectable, editable, and copyable in one go.
 - **Archive with full-text search** — keep drafts as Markdown files per project, curated with folder, description, and tags; browse them as a wiki and search their full text. A hit says which field it came from, and opening it highlights the findings in the document and scrolls to them — including in the editor, at the spot you were reading.
 - **Editors that fit the format** — Markdown as source text with syntax colours, shortcuts, running lists and a table dialog, live preview beside it; HTML notes in a WYSIWYG surface with tables, text flow and per-row delete buttons. JSON, YAML, XML and plain text open in the same editor with their own grammar.
@@ -32,20 +33,25 @@ Running Claude Code with multiple accounts or credential sets means hitting the 
 
 ## Text panel and MCP tools
 
-The app ships an MCP stdio server (`ai-central --mcp-panel`, server key `text-panel`) and provisions it into every pool, including the tool permission — no per-pool setup. Six tools:
+The app ships an MCP stdio server (`ai-central --mcp-panel`, server key `text-panel`) and provisions it into every pool, including the tool permission — no per-pool setup. Nine tools:
 
 | Tool | Purpose |
 |---|---|
 | `write_panel` | Place a Markdown draft in the panel instead of printing it as chat prose; accepts inline text or a file path (the server reads the file itself). |
 | `write_commands` | List shell commands for the user as copyable tiles (command + optional note), appended to the session's command history. |
 | `show_commands` | Show the command history (tile view). |
+| `write_todos` | Append tasks to the project's persistent todo list (text, optional note and due date). |
+| `show_todos` | Show the todo list (tile view) without adding anything. |
+| `show_commit` | Open the commit dialog as its own window — every Git repository of the project with its changed files, diff, and push pre-check; accepts a suggested message per repository. |
 | `archive_panel` | Save the current draft as a Markdown file into the project's archive home; takes `folder`, `description`, `tags` for the frontmatter. |
 | `show_archive` | Render the archive overview as a wiki page — documents grouped by folder, with descriptions and clickable tag links; with `tag`, that tag's page. |
 | `search_archive` | FTS5 full-text search over the archive (words, "phrases", prefix*); hits appear as tiles in the panel. |
 
-The panel docks into the terminal window and can be detached into its own window. The header tab bar switches between **Commands** (command tiles), the current **document**, **Wiki**, and **Search** (live search, `#tag` filtering); without a configured archive home the archive tabs stay hidden. The draft's title is taken from its first heading and is editable, as is the content. Spell checking follows `spellcheckLang` (per-text override in the panel).
+The panel comes in two surfaces. The **session** surface — **Todo**, **Commands**, and the current **document** — docks into the terminal window and can be detached into a window of its own; the **archive** surface — **Wiki** and **Search** (live search, `#tag` filtering) — always opens as its own window, so a note stays open beside the running session. Without a configured archive home the archive tabs stay hidden. The draft's title is taken from its first heading and is editable, as is the content. Spell checking follows `spellcheckLang` (per-text override in the panel).
 
-The archive lives in the project's `archiveHome` (set in `.ai-central/config.json`); documents are plain Markdown files with frontmatter — no database, the search index is built in-memory per query. It covers the note body plus title, description, tags and file name as separate fields, along with the content of text files (JSON, YAML, XML, logs, scripts); `.drawio` diagrams open in the bundled viewer, ePub files in the reader.
+Every window carries a font-size rocker in its header, remembered per window kind. Docked, the tiles follow the terminal's font size instead, so both halves of the window read at the same size.
+
+The archive lives in the project's `archiveHome` (set in `.ai-central/config.json`); documents are plain Markdown files with frontmatter — no database, the search index is built in-memory per query. It covers the note body plus title, description, tags and file name as separate fields, along with the content of text files (JSON, YAML, XML, logs, scripts); `.drawio` diagrams open in the bundled viewer, ePub files in the reader, and images show a thumbnail in the list and open full size in their own window — one window per image, so several can be compared side by side.
 
 ![Draft document in the panel beside the terminal](docs/panel-draft.png)
 
@@ -235,7 +241,7 @@ Prerequisites: Rust (stable), Node.js/npm. `dev.sh`/`build.sh` expect `CARGO_HOM
 | `claudeCommand`    | `claude` | Command launched in the project terminal (via your login shell, `$SHELL -lc`, so your profile PATH applies). |
 | `syncOnSessionEnd` | `false`  | After a session ends, commit and push the Git repository containing the project. |
 | `poolSyncDir`      | unset    | Directory to sync pool runtime data into (session transcripts, todos, prompt history — what `/resume` needs). When set, a pool's runtime files are replaced by symlinks into `<poolSyncDir>/<pool>`, so sessions travel with however that directory is synced (git, Syncthing, …). Unset: everything stays local in the pool directory. |
-| `terminalFontSize` | `13`     | Font size of the built-in terminal (also adjustable from the terminal window). |
+| `terminalFontSize` | `13`     | Font size of the built-in terminal (also adjustable from the terminal window); the docked panel's tiles follow it. |
 | `spellcheckLang`   | `de`     | Spell-check language of the text panel (per-text override in the panel). |
 
 ## Claude and Anthropic

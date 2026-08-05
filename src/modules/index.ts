@@ -39,6 +39,8 @@ export interface PanelTab {
   /// Puffer-ID für buffer_read; Updates als `<buffer>-update`.
   buffer: string;
   labelKey: string;
+  /// Ein-Buchstaben-Form für den inaktiven Tab (nur die Sitzungs-Tabs).
+  kurzKey?: string;
   titleKey: string;
   /// Visueller Trenner hinter dem Tab.
   sepAfter?: boolean;
@@ -52,4 +54,4 @@ export interface PanelTab {
 // Der Entwurf ("draft") hat bewusst KEINEN Tab: Die Ansicht erscheint, wenn
 // ein Entwurf hereinkommt (panel-update → mode "draft") oder eine Notiz zum
 // Bearbeiten geladen wird — als flüchtige Fläche, nicht als Reiter.
-export const PANEL_TABS: PanelTab[] = [wikiTab, searchTab, todoTab, commandsTab];
+export const PANEL_TABS: PanelTab[] = [todoTab, commandsTab, wikiTab, searchTab];

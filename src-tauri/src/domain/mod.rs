@@ -7,6 +7,7 @@ pub(crate) mod archive_index;
 pub(crate) mod archive_html;
 pub(crate) mod archive_ops;
 pub(crate) mod archive_search;
+pub(crate) mod search_index;
 pub(crate) mod credentials;
 pub(crate) mod epub;
 pub(crate) mod git;

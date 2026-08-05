@@ -37,3 +37,31 @@ Object.defineProperty(window, "ResizeObserver", {
   configurable: true,
   value: ResizeObserverStub,
 });
+
+/// happy-dom kennt kein `document.fonts`; die Tab-Leiste misst nach dem
+/// Laden der Schrift das längste Wort. Der Stub ist sofort erfüllt — Breiten
+/// gibt es in der Testumgebung ohnehin keine.
+Object.defineProperty(document, "fonts", {
+  configurable: true,
+  value: { ready: Promise.resolve() },
+});
+
+/// happy-dom kennt keinen IntersectionObserver; die Archiv-Übersicht lädt
+/// damit ihre Bildvorschauen erst beim Sichtbarwerden. Der Stub meldet jedes
+/// beobachtete Element sofort als sichtbar — im Test gibt es kein Blickfeld,
+/// und geprüft wird, was danach geschieht.
+class IntersectionObserverStub {
+  ruf: (e: { isIntersecting: boolean; target: Element }[]) => void;
+  constructor(ruf: (e: { isIntersecting: boolean; target: Element }[]) => void) {
+    this.ruf = ruf;
+  }
+  observe(el: Element) {
+    this.ruf([{ isIntersecting: true, target: el }]);
+  }
+  unobserve() {}
+  disconnect() {}
+}
+Object.defineProperty(window, "IntersectionObserver", {
+  configurable: true,
+  value: IntersectionObserverStub,
+});

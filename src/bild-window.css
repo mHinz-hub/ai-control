@@ -1,0 +1,79 @@
+/* Bildfenster: Bühne über einer Fußzeile mit Pfad und Maßen. Rahmen, Topbar
+   und Resize-Zonen kommen aus panel-window.css — dieselbe Fensteroptik wie
+   Panel, Terminal und Commit-Dialog. */
+
+.bild-heading {
+  font-weight: 600;
+  margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Die Zoomknöpfe sitzen in der Topbar, nicht über dem Bild: dort verdeckten
+   sie gerade den Rand, auf den es beim Beschneiden ankommt. */
+.bild-zoom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 10px;
+}
+.bild-faktor {
+  min-width: 3.6em;
+  text-align: center;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.bild-buehne {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+/* Karogrund: eine freigestellte Figur ist auf ihm als freigestellt zu
+   erkennen — auf einfarbigem Grund sieht sie aus wie eine mit weißer
+   Fläche. */
+.bild-buehne.karo {
+  background-image:
+    linear-gradient(45deg, var(--line) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--line) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--line) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--line) 75%);
+  background-size: 16px 16px;
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+}
+.bild {
+  display: block;
+  height: auto;
+  /* Ganze Pixel zeigen, nicht geglättete: beim Nachschneiden ist die Kante
+     die Frage. */
+  image-rendering: pixelated;
+}
+.bild-fuss {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  padding: 5px 10px;
+  color: var(--muted);
+  font: 11px/1.4 -apple-system, system-ui, sans-serif;
+}
+.bild-pfad {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bild-masse {
+  font-variant-numeric: tabular-nums;
+}
+.bild-fehler {
+  color: var(--rot, #f38ba8);
+  font: 12px/1.5 Menlo, monospace;
+  white-space: pre-wrap;
+}

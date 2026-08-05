@@ -64,9 +64,9 @@ header {
 #project-icon[hidden] {
   display: none;
 }
-/* Datei-Knopf und Tab-Leiste sitzen rechts; das `auto` trägt der Knopf, damit
-   die Leiste auch dann rechts bleibt, wenn die Tabs ausgeblendet sind. */
-#term-files {
+/* Die rechte Gruppe beginnt mit der Schriftgrößen-Wippe; das `auto` trägt
+   deshalb sie — Datei-Knopf und Tabs folgen. */
+#zoom-anker {
   margin-left: auto;
 }
 /* Tab-Leiste im Header: Befehle │ Dokument · Wiki · Suche. */
@@ -285,9 +285,9 @@ header .panel-tabs[hidden] {
   gap: 2px;
   min-width: 0;
 }
-/* Ausblenden rechts in der Titelzeile. Der Ablösen-Knopf davor ist dauerhaft
-   versteckt — der Abstandshalter muss deshalb am Ausblenden-Knopf hängen. */
-#panel-hide {
+/* Ablösen und Ausblenden stehen als Paar rechts in der Titelzeile; der
+   Abstandshalter hängt am ersten der beiden. */
+#panel-detach {
   margin-left: auto;
 }
 .panel-actions {
@@ -325,6 +325,35 @@ header .panel-tabs[hidden] {
 .panel-btn:hover {
   background: var(--line);
   color: var(--text);
+}
+/* Schriftgrößen-Wippe in der Kopfleiste — gleiche Maße wie im Panel-Fenster,
+   dessen Stilblatt das Terminal nicht lädt. */
+.zoom-wippe {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0;
+  background: var(--line);
+  border-radius: 8px;
+  padding: 1px;
+}
+.zoom-btn {
+  width: 1.9em;
+  padding: 4px 0;
+  justify-content: center;
+  color: var(--text);
+  font-weight: 600;
+}
+.zoom-btn:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.zoom-wert {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  width: 3.6em;
+  text-align: center;
 }
 .panel-btn.copied {
   color: var(--ok);

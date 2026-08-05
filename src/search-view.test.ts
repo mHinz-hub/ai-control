@@ -28,15 +28,17 @@ describe("initSearchView", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("sucht ab 3 Zeichen nach 300 ms mit Präfix-Stern", () => {
+  /// Die Eingabe geht unverändert an die Suche — der Trigramm-Index trifft
+  /// Wortteile von sich aus, ein angehängter Stern wäre nur Ballast.
+  it("sucht ab 3 Zeichen nach 300 ms mit der Eingabe, wie sie ist", () => {
     const { onSearch, type } = setup();
     type("arch");
     expect(onSearch).not.toHaveBeenCalled();
     vi.advanceTimersByTime(300);
-    expect(onSearch).toHaveBeenCalledWith("arch*");
+    expect(onSearch).toHaveBeenCalledWith("arch");
   });
 
-  it("hängt an #tag-Tokens keinen Stern an", () => {
+  it("reicht #tag-Tokens unverändert durch", () => {
     const { onSearch, type } = setup();
     type("panel #adr");
     vi.advanceTimersByTime(300);
@@ -50,7 +52,7 @@ describe("initSearchView", () => {
     type("arch");
     vi.advanceTimersByTime(300);
     expect(onSearch).toHaveBeenCalledOnce();
-    expect(onSearch).toHaveBeenCalledWith("arch*");
+    expect(onSearch).toHaveBeenCalledWith("arch");
   });
 
   it("räumt beim Löschen unter 3 Zeichen auf und zeigt den Hinweis", () => {
@@ -88,6 +90,7 @@ describe("initSearchView", () => {
       "a/2026-01-01_0000-x.md",
       "id-x",
       ["arch"],
+      "",
     );
   });
 
@@ -114,7 +117,61 @@ describe("initSearchView", () => {
     const tile = document.querySelector<HTMLElement>(".hit-tile")!;
     expect(tile.querySelector(".hit-field")!.textContent).toBe("im Schlagwort");
     tile.click();
-    expect(onOpen).toHaveBeenCalledWith("/tmp/archiv/x.md", "x.md", "id-x", []);
+    expect(onOpen).toHaveBeenCalledWith("/tmp/archiv/x.md", "x.md", "id-x", [], "");
+  });
+
+  /// Ein Kapitel heißt „Teil II“ — das sagt nichts, sobald zwei Bände im
+  /// Archiv liegen. Der Buchtitel steht darum davor, und der Pfad nennt nur
+  /// den Ordner: der Dateiname ist der Titel, den die Kopfzeile schon trägt.
+  it("nennt bei einem Kapitel das Buch und darunter den Ordner", () => {
+    const { view } = setup();
+    view.set(
+      JSON.stringify({
+        query: "regel",
+        tag: null,
+        home: "/tmp/archiv",
+        hits: [
+          {
+            id: "epub:ePubs/grundlagen.epub",
+            relpath: "ePubs/grundlagen.epub",
+            title: "Teil II",
+            buch: "Bemerkungen über die Grundlagen der Mathematik",
+            teil: "text/ch012.xhtml",
+            snippet: "der **Regel** folgen",
+          },
+        ],
+      }),
+    );
+    const tile = document.querySelector<HTMLElement>(".hit-tile")!;
+    expect(tile.querySelector(".hit-title")!.textContent).toBe(
+      "Bemerkungen über die Grundlagen der Mathematik › Teil II",
+    );
+    expect(tile.querySelector(".hit-path")!.textContent).toBe("ePubs");
+  });
+
+  /// Bei allem anderen ist der Pfad die Herkunft — lesbar, ohne Endung.
+  it("zeigt den Pfad einer Notiz ohne Endung", () => {
+    const { view } = setup();
+    view.set(
+      JSON.stringify({
+        query: "arch",
+        tag: null,
+        home: "/tmp/archiv",
+        hits: [
+          {
+            id: "id-x",
+            relpath: "konzepte/panel/dokumentmodell.md",
+            title: "Dokumentmodell",
+            snippet: "ein **arch**iv",
+          },
+        ],
+      }),
+    );
+    const tile = document.querySelector<HTMLElement>(".hit-tile")!;
+    expect(tile.querySelector(".hit-title")!.textContent).toBe("Dokumentmodell");
+    expect(tile.querySelector(".hit-path")!.textContent).toBe(
+      "konzepte › panel › dokumentmodell",
+    );
   });
 
   it("zeigt „Keine Treffer“ bei leerem Ergebnis", () => {

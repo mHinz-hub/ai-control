@@ -18,6 +18,7 @@ import { applyTheme, THEMES } from "./themes";
 import { flash, panelToast } from "./tiles";
 import { initArchiveForm } from "./archive-form";
 import { applyI18n, t } from "./messages";
+import { initZoom } from "./zoom";
 
 // Debug-Instrumentierung: Fehler auf der Seite anzeigen und ins Dev-Log spiegeln.
 function showError(msg: string) {
@@ -36,6 +37,7 @@ window.addEventListener("unhandledrejection", (e) =>
 );
 
 applyI18n();
+initZoom(document.getElementById("zoom-anker")!, "terminal");
 const project = new URLSearchParams(location.search).get("project")!;
 const win = getCurrentWebviewWindow();
 
@@ -140,9 +142,18 @@ term.loadAddon(fit);
 function applyFontSize(px: number) {
   fontSize = Math.max(8, Math.min(24, px));
   term.options.fontSize = fontSize;
+  kachelSchrift();
   fit.fit();
   invoke("set_terminal_font_size", { size: fontSize });
 }
+
+/// Kacheln im angedockten Panel folgen der Terminalschrift: nebeneinander
+/// sollen beide gleich groß wirken. Im abgelösten Fenster gibt es die
+/// Variable nicht — dort gilt der Vorgabewert aus panel-tiles.css.
+function kachelSchrift() {
+  document.documentElement.style.setProperty("--tile-font", `${fontSize}px`);
+}
+kachelSchrift();
 
 // Shift+Enter als CSI-u-Sequenz senden (Zeilenumbruch in Claude Code,
 // auch bei nicht-leerer Zeile). Neben keydown muss auch keypress unter-
@@ -215,7 +226,6 @@ const panel = document.getElementById("panel")!;
 const splitter = document.getElementById("splitter")!;
 
 let detached = false;
-let hasContent = false;
 
 function showPanel() {
   panel.hidden = false;
@@ -231,14 +241,12 @@ function hidePanel() {
 // Gemeinsame Verdrahtung (Views, Modi, Update-Events); jedes eingehende
 // Update blendet das angedockte Panel ein, solange es nicht abgelöst ist.
 const { view, views, mode } = await wirePanel(project, () => {
-  hasContent = true;
   if (!detached) showPanel();
 });
 // Panel startet zugeklappt — außer das ToDo-Modul ist gewählt und die Liste
 // nicht leer: dann öffnet das Panel beim Start mit der ToDo-Ansicht.
 const todos = views.get("todo");
 if (todos && !todos.empty()) {
-  hasContent = true;
   showPanel();
   mode.to("todo");
 } else {
@@ -264,7 +272,6 @@ headerTabs.addEventListener(
   { capture: true },
 );
 headerTabs.addEventListener("click", () => {
-  hasContent = true;
   if (!detached) showPanel();
 });
 
@@ -276,10 +283,13 @@ await listen("panel-detached", () => {
   hidePanel();
   mode.clear();
 });
-await listen("panel-attached", () => {
+// Andocken aus dem Sitzungs-Fenster: das Panel kommt mit dem dort zuletzt
+// offenen Tab zurück ins Dock.
+await listen<string>("panel-attached", (e) => {
   detached = false;
   headerTabs.hidden = false;
-  if (hasContent) showPanel();
+  showPanel();
+  mode.to(e.payload);
 });
 // Abgelöstes Fenster geschlossen (per ✕ oder OS): angedocktes Panel bleibt
 // ausgeblendet, aber der nächste Entwurf darf es wieder einblenden.
@@ -288,10 +298,24 @@ await listen("panel-window-closed", () => {
   headerTabs.hidden = false;
 });
 
-// Ablösen gibt es nicht mehr — die Flächen sind fest verteilt; der Knopf
-// bleibt versteckt.
-document.getElementById("panel-detach")!.hidden = true;
+// Ablösen: die Sitzungsfläche — Entwurf, Befehle, Aufgaben — geht in ein
+// eigenes Fenster. Das Archiv hat sein eigenes und wird davon nicht berührt.
+document.getElementById("panel-detach")!.addEventListener("click", () => {
+  void invoke("open_panel_window", { project, mode: mode.current() ?? "commands" });
+  // Zweimal dieselbe Fläche wäre eine zuviel: das Dock klappt zu. Ein Klick
+  // auf einen Tab holt es zurück, das Fenster bleibt davon unberührt.
+  hidePanel();
+  mode.clear();
+});
+// Schließen: steht der Entwurf vorn, ist er damit verworfen — der Puffer wird
+// geleert, das Panel bleibt offen und schaltet auf ToDo. Den Wechsel macht
+// das `panel-update` des leeren Puffers, deshalb hier kein clear(). Aus ToDo
+// oder Befehlen heraus klappt das Panel zu.
 document.getElementById("panel-hide")!.addEventListener("click", () => {
+  if (mode.current() === "draft") {
+    void invoke("panel_clear", { project });
+    return;
+  }
   hidePanel();
   mode.clear();
 });

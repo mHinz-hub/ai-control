@@ -18,6 +18,9 @@
   min-height: 0;
   overflow: auto;
   padding: 12px 14px;
+  /* Basis der Kacheltexte: angedockt setzt terminal.ts die Variable auf die
+     Terminalschrift, damit beide Flächen gleich groß wirken. */
+  font-size: var(--tile-font, 12px);
 }
 #commands-content::-webkit-scrollbar {
   width: 8px;
@@ -32,7 +35,7 @@
   border-top: 1px solid var(--line);
   color: var(--faint);
   font:
-    500 11px/1 -apple-system,
+    500 0.92em/1 -apple-system,
     system-ui,
     sans-serif;
   user-select: none;
@@ -47,7 +50,7 @@
   justify-content: space-between;
   color: var(--faint);
   font:
-    500 11px/1 -apple-system,
+    500 0.92em/1 -apple-system,
     system-ui,
     sans-serif;
   user-select: none;
@@ -87,7 +90,7 @@
 }
 .cmd-text {
   font-family: "JetBrains Mono", Menlo, monospace;
-  font-size: 12px;
+  font-size: 1em;
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-all;
@@ -99,7 +102,7 @@
   margin-top: 4px;
   color: var(--muted);
   font:
-    400 11px/1.4 -apple-system,
+    400 0.92em/1.4 -apple-system,
     system-ui,
     sans-serif;
 }
@@ -110,6 +113,7 @@
   min-height: 0;
   overflow: auto;
   padding: 12px 14px;
+  font-size: var(--tile-font, 12px);
 }
 #todo-content::-webkit-scrollbar {
   width: 8px;
@@ -120,7 +124,7 @@
 }
 .todo-text {
   font:
-    400 12px/1.45 -apple-system,
+    400 1em/1.45 -apple-system,
     system-ui,
     sans-serif;
   word-break: break-word;
@@ -134,7 +138,7 @@
   border-radius: 999px;
   padding: 2px 8px;
   font-family: "JetBrains Mono", Menlo, monospace;
-  font-size: 10px;
+  font-size: 0.84em;
   font-weight: 500;
 }
 .todo-due.overdue {
@@ -160,7 +164,7 @@
   background: transparent;
   color: var(--muted);
   font:
-    500 11px/1 -apple-system,
+    500 0.92em/1 -apple-system,
     system-ui,
     sans-serif;
   border-radius: 6px;
@@ -249,16 +253,18 @@
 .hit-search {
   margin-bottom: 8px;
 }
+/* Das Suchfeld trägt die Eingabe, an der die ganze Ansicht hängt — es steht
+   darum eine Stufe größer als die Trefferliste darunter. */
 .hit-search input {
   width: 100%;
   box-sizing: border-box;
   background: var(--tile);
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 6px 10px;
+  padding: 9px 12px;
   color: var(--text);
   font:
-    400 12px/1.4 -apple-system,
+    400 15px/1.4 -apple-system,
     system-ui,
     sans-serif;
   outline: none;
@@ -299,6 +305,74 @@
 .hit-title {
   font:
     600 12px/1.4 -apple-system,
+    system-ui,
+    sans-serif;
+}
+/* Fundstellen im Treffer — die Zahl steht neben dem Titel, nicht im Text. */
+.hit-count {
+  margin-top: 3px;
+  color: var(--faint);
+  font:
+    500 10px/1.3 -apple-system,
+    system-ui,
+    sans-serif;
+}
+/* Fundstellen einer Kachel: Aufklapper und die Zeilen darunter. Die Zeile
+   ist der Satz um die Stelle, davor die Druckseite — damit lässt sich
+   zitieren, ohne das Buch zu öffnen. */
+.hit-more {
+  margin-top: 6px;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  padding: 2px 0;
+  font:
+    500 11px/1.3 -apple-system,
+    system-ui,
+    sans-serif;
+  cursor: pointer;
+}
+.hit-spots[hidden] {
+  display: none;
+}
+.hit-spots {
+  margin: 2px 0 0 10px;
+  border-left: 2px solid var(--line-strong);
+  padding-left: 10px;
+}
+.hit-spot {
+  display: flex;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  font:
+    400 11px/1.5 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.hit-spot:hover {
+  background: var(--tile);
+}
+.hit-spot-page {
+  flex: none;
+  min-width: 6em;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.hit-spot-text {
+  color: var(--muted);
+}
+.hit-spot mark {
+  background: transparent;
+  color: var(--warn);
+  font-weight: 600;
+}
+.hit-warn {
+  margin-top: 6px;
+  color: var(--warn);
+  font:
+    500 11px/1.4 -apple-system,
     system-ui,
     sans-serif;
 }
@@ -488,6 +562,23 @@
 .wiki-tree summary.active .wiki-tree-icon svg,
 .wiki-tree-doc.active .wiki-tree-icon svg {
   stroke: var(--accent);
+}
+/* Vorschau statt Symbol: bei einer Zeichnung sagt der Dateiname wenig und das
+   Bildchen alles. Es steht an der Stelle des Symbols und in dessen Größe, mit
+   etwas mehr Breite — eine liegende Figur wäre sonst nicht zu erkennen. */
+.wiki-tree-thumb {
+  flex: none;
+  width: 2.4em;
+  height: 1.6em;
+  margin-right: 0.4em;
+  object-fit: contain;
+  border-radius: 2px;
+  /* Vor dem Laden und bei durchsichtigem Grund: eine schwache Fläche, damit
+     die Zeile nicht springt und weiße Striche sichtbar bleiben. */
+  background: var(--line);
+}
+.wiki-tree-thumb-leer {
+  visibility: hidden;
 }
 .wiki-tree-doc:hover {
   background: var(--tile);
@@ -1265,6 +1356,20 @@
   overflow: auto;
 }
 /* Rohtext-Ansicht sonstiger Dateien (JSON, Logs …). */
+/* Bild-Ansicht im Archiv: eingepaßt in die Fläche, Klick öffnet das Fenster. */
+.wiki-note-bild {
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  min-height: 0;
+  flex: 1;
+}
+.wiki-note-bild img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  cursor: zoom-in;
+}
 .wiki-note-plain {
   margin: 0;
   font-family: "JetBrains Mono", Menlo, monospace;
@@ -1680,17 +1785,30 @@
   gap: 10px;
 }
 .epub-toc {
-  flex: 0 0 190px;
+  flex: 0 0 210px;
   min-height: 0;
   overflow-y: auto;
   border-right: 1px solid var(--line-strong);
-  padding-right: 6px;
+  padding-right: 8px;
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
 .epub-toc[hidden] {
   display: none;
+}
+/* Der Buchtitel über dem Verzeichnis: er sagt, wessen Gliederung das ist. */
+.epub-toc-kopf {
+  padding: 2px 8px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+  color: var(--faint);
+  font:
+    600 11px/1.3 -apple-system,
+    system-ui,
+    sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 .epub-toc-item {
   border: none;
@@ -1699,15 +1817,40 @@
   text-align: left;
   cursor: default;
   border-radius: 6px;
-  padding: 5px 8px;
+  padding: 6px 8px;
   font:
-    500 12px/1.35 -apple-system,
+    500 13px/1.4 -apple-system,
     system-ui,
     sans-serif;
+}
+/* Die Gliederungstiefe steht im Einzug; der Grad nimmt mit ihr ab, damit die
+   Hauptteile beim Überfliegen zuerst ins Auge fallen. */
+.epub-toc-item.stufe1 {
+  font-size: 12px;
+  font-weight: 400;
+}
+.epub-toc-item.stufe2,
+.epub-toc-item.stufe3 {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--faint);
 }
 .epub-toc-item:hover {
   background: var(--line);
   color: var(--text);
+}
+/* Nach einem Klick bliebe der Rahmen der Zeile stehen und sähe aus wie die
+   Stelle, an der man liest. Wer mit der Tastatur unterwegs ist, behält ihn. */
+.epub-toc-item:focus:not(:focus-visible),
+.epub-blaettern:focus:not(:focus-visible),
+.epub-nav:focus:not(:focus-visible) {
+  outline: none;
+}
+/* Das Kapitel, in dem der Leser steht. */
+.epub-toc-item.hier {
+  background: var(--line);
+  color: var(--text);
+  box-shadow: inset 2px 0 0 var(--accent, var(--text));
 }
 /* Seitenfläche: die Buchseite sitzt oben links, ihr Maßstab kommt aus dem
    Viewer (feste Seiten) — deshalb kein Zentrieren per Flex. */
@@ -1730,6 +1873,11 @@
   height: 100%;
   border: none;
   background: #fff;
+  /* Die Buchseite steht auf Weiß, auch wenn der Rechner auf Nacht steht.
+     Ohne diese Ansage meldet das eingebettete Dokument das Schema des
+     Systems, und ein Buch, das seine Zeichnungen für dunklen Grund aufhellt,
+     stellt sie hell auf Weiß. */
+  color-scheme: only light;
   transform-origin: top left;
 }
 .epub-bar {
@@ -1765,8 +1913,156 @@
   min-width: 72px;
   text-align: center;
 }
-.epub-meta {
+/* Auskunft und Nachtmodus stehen in der Titelzeile bei den übrigen Aktionen
+   des Buchs, in deren Größe — sie sind so gut zu treffen wie der Papierkorb
+   daneben. */
+.wiki-note-titlerow .epub-info,
+.wiki-note-titlerow .epub-nacht,
+.wiki-note-titlerow .epub-klapp,
+.wiki-note-titlerow .epub-seitig,
+.wiki-note-titlerow .epub-marker,
+.wiki-note-titlerow .epub-kleiner,
+.wiki-note-titlerow .epub-groesser {
+  color: var(--text);
+  line-height: 1;
+}
+.wiki-note-titlerow .epub-info:hover,
+.wiki-note-titlerow .epub-nacht:hover,
+.wiki-note-titlerow .epub-klapp:hover,
+.wiki-note-titlerow .epub-seitig:hover,
+.wiki-note-titlerow .epub-marker:hover,
+.wiki-note-titlerow .epub-kleiner:hover,
+.wiki-note-titlerow .epub-groesser:hover {
+  background: var(--line);
+  border-radius: 6px;
+}
+/* Seitenmodus und Umbruchmarken sind Zustände, keine Befehle — eingeschaltet
+   bleiben sie sichtbar. */
+.wiki-note-titlerow .epub-seitig.an,
+.wiki-note-titlerow .epub-marker.an {
+  background: var(--line);
+  border-radius: 6px;
+}
+/* Die Druckseite steht am linken Ende der Fußzeile, bei der Buchangabe: sie
+   gehört zum Buch, nicht zur Bedienung. */
+.epub-seite {
   margin-right: auto;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Die beiden Schriftgrad-Knöpfe stehen als Paar zusammen und schmaler als
+   die Zeichen daneben — sie tragen zwei Glyphen statt einer. */
+.wiki-note-titlerow .epub-kleiner,
+.wiki-note-titlerow .epub-groesser {
+  font-size: 1.05rem;
+  padding: 0.35em 0.3em;
+}
+/* Ist das Verzeichnis zugeklappt, tritt sein Schalter zurück. */
+.wiki-note-titlerow .epub-klapp.zu {
+  color: var(--faint);
+}
+/* Angaben zum Buch: aufgeklappt zwischen Fußzeile und Seite, damit der Text
+   mit der Maus zu greifen ist. */
+.epub-angaben {
+  flex: none;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--tile);
+  user-select: text;
+}
+.epub-angaben[hidden] {
+  display: none;
+}
+.epub-angaben dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 3px 14px;
+  margin: 0 0 8px;
+  font:
+    400 12.5px/1.45 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.epub-angaben dt {
+  color: var(--faint);
+}
+.epub-angaben dd {
+  margin: 0;
+  color: var(--text);
+}
+.epub-kopie {
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--muted);
+  cursor: default;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font:
+    500 11.5px/1 -apple-system,
+    system-ui,
+    sans-serif;
+}
+.epub-kopie:hover {
+  background: var(--line);
+  color: var(--text);
+}
+/* Blättern am Rand der Seite: die Flächen liegen über dem Buch und halten
+   sich zurück, bis der Zeiger sie sucht. */
+.epub-blaettern {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 46px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: default;
+  font-size: 26px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.epub-blaettern.links {
+  left: 0;
+}
+.epub-blaettern.rechts {
+  right: 16px;
+}
+.epub-stage:hover .epub-blaettern:not(:disabled) {
+  opacity: 0.45;
+}
+.epub-stage .epub-blaettern:hover:not(:disabled) {
+  opacity: 1;
+  background: linear-gradient(
+    to var(--zu, right),
+    rgb(0 0 0 / 0.06),
+    transparent
+  );
+}
+.epub-blaettern.rechts:hover:not(:disabled) {
+  --zu: left;
+}
+.epub-blaettern:disabled {
+  opacity: 0;
+}
+.epub-stage.nacht .epub-blaettern {
+  color: #d8d8d8;
+}
+
+/* Dunkel lesen: die Seite wird als Ganzes umgekehrt, die Drehung des Farbtons
+   hält Blau blau und Rot rot. Das Buch selbst bleibt unangetastet — es setzt
+   keine Farben und könnte darum von sich aus nicht dunkel werden. */
+.epub-stage.nacht {
+  background: #14161a;
+}
+.epub-stage.nacht .epub-frame {
+  filter: invert(1) hue-rotate(180deg);
+  background: #fff;
+}
+.epub-meta {
   color: var(--faint);
   overflow: hidden;
   text-overflow: ellipsis;

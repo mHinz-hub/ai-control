@@ -24,6 +24,8 @@ function setup(pending: string | null = null, drawio = false, marks: string[] = 
   const writeDoc = vi.fn(() => Promise.resolve());
   const writeFile = vi.fn(() => Promise.resolve());
   const openEpub = vi.fn(() => Promise.resolve(BUCH));
+  const readImage = vi.fn(() => Promise.resolve("data:image/png;base64,AA"));
+  const openImage = vi.fn();
   const openDrawio = vi.fn();
   const setTitle = vi.fn();
   const openWiki = vi.fn();
@@ -46,6 +48,8 @@ function setup(pending: string | null = null, drawio = false, marks: string[] = 
     writeDoc,
     writeFile,
     openEpub,
+    readImage,
+    openImage,
     drawioAvailable: () => drawio,
     openDrawio,
     setTitle,
@@ -59,7 +63,8 @@ function setup(pending: string | null = null, drawio = false, marks: string[] = 
     actions,
   });
   return {
-    view, readDoc, readFile, writeDoc, writeFile, openEpub, openDrawio, setTitle, openWiki, actions,
+    view, readDoc, readFile, writeDoc, writeFile, openEpub, readImage, openImage,
+    openDrawio, setTitle, openWiki, actions,
   };
 }
 
@@ -298,6 +303,8 @@ describe("initWikiView — HTML-Notizen", () => {
       writeDoc: vi.fn(() => Promise.resolve()),
       writeFile: vi.fn(() => Promise.resolve()),
       openEpub: vi.fn(() => Promise.resolve(BUCH)),
+      readImage: vi.fn(() => Promise.resolve("data:image/png;base64,AA")),
+      openImage: vi.fn(),
       drawioAvailable: () => false,
       openDrawio: vi.fn(),
       setTitle: vi.fn(),
@@ -420,6 +427,38 @@ describe("initWikiView — HTML-Notizen", () => {
     knopf.click();
     expect(openDrawio).toHaveBeenCalledWith("id-skizze");
     expect(document.querySelector(".wiki-note-drawio")).not.toBeNull();
+  });
+
+  const bildSeite = JSON.stringify({
+    kind: "page",
+    home: "/tmp/archiv",
+    tag: null,
+    total: 1,
+    tags: [],
+    folders: [{ name: "", docs: [doc("figur.png", "figur", { kind: "file" })] }],
+  });
+
+  /// In der Übersicht steht vor einer Bilddatei ihre Vorschau statt eines
+  /// Symbols — bei einer Zeichnung sagt der Dateiname wenig.
+  it("Bild zeigt sich als Vorschau in der Liste", async () => {
+    const { view, readImage } = setup();
+    view.set(bildSeite);
+    await Promise.resolve();
+    const thumb = document.querySelector<HTMLImageElement>(".wiki-tree-thumb")!;
+    expect(thumb).not.toBeNull();
+    expect(readImage).toHaveBeenCalledWith("id-figur");
+    expect(thumb.src).toBe("data:image/png;base64,AA");
+  });
+
+  /// Die Ansicht zeigt das Bild, und der Knopf gibt es ins eigene Fenster.
+  it("Bild öffnet sich im Fenster", async () => {
+    const { view, openImage } = setup();
+    view.set(bildSeite);
+    document.querySelector<HTMLElement>(".wiki-doc-entry")!.click();
+    await Promise.resolve();
+    expect(document.querySelector(".wiki-note-bild")).not.toBeNull();
+    document.querySelector<HTMLElement>(".wiki-bild-fenster")!.click();
+    expect(openImage).toHaveBeenCalledWith("id-figur");
   });
 
   /// Der Leer-Test entscheidet, ob der Viewer läuft oder der Platzhalter

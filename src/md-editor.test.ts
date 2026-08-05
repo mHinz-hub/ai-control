@@ -1,7 +1,14 @@
 // Schreibhilfen des Markdown-Editors: Listen laufen beim Enter weiter,
 // Tabellen kommen als lesbares Gerüst.
 import { describe, expect, it } from "vitest";
-import { initMdEditor, listenPrefix, mdTabelle, stellen } from "./md-editor";
+import {
+  initMdEditor,
+  listenPrefix,
+  mdTabelle,
+  stellen,
+  xmlMangel,
+  yamlMangel,
+} from "./md-editor";
 
 describe("listenPrefix", () => {
   it("setzt Aufzählung, Nummerierung und Zitat fort", () => {
@@ -73,5 +80,23 @@ describe("Fundstellen", () => {
     // (`nummer: 1`) — ihre Position liefert `stellen`.
     expect(ed.el.querySelectorAll(".cm-hit")).toHaveLength(2);
     expect(stellen(ed.value(), ["kessel"])[1]).toEqual({ von: 24, bis: 30 });
+  });
+});
+
+describe("Prüfung der Datenformate", () => {
+  it("YAML: meldet den Fehler mit Stelle", () => {
+    expect(yamlMangel("a: 1\nb: 2\n")).toBeNull();
+    const m = yamlMangel("a:\n b: [1,\n")!;
+    expect(m).not.toBeNull();
+    expect(m.von).toBeGreaterThan(0);
+    expect(m.text).toBeTruthy();
+  });
+
+  it("XML: meldet unausgeglichene Marken, lässt gültiges durch", () => {
+    expect(xmlMangel('<?xml version="1.0"?>\n<a><b/></a>')).toBeNull();
+    expect(xmlMangel("")).toBeNull();
+    const m = xmlMangel("<a><b></a>")!;
+    expect(m).not.toBeNull();
+    expect(m.text).toBeTruthy();
   });
 });

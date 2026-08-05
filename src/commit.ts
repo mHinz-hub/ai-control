@@ -17,6 +17,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { applyTheme, THEMES } from "./themes";
 import { applyI18n, t } from "./messages";
+import { initZoom } from "./zoom";
 import { renderDiff } from "./diff-view";
 import { flash } from "./tiles";
 
@@ -45,6 +46,7 @@ interface CommitDone {
 }
 
 applyI18n();
+initZoom(document.getElementById("zoom-anker")!, "commit");
 const project = new URLSearchParams(location.search).get("project")!;
 const win = getCurrentWebviewWindow();
 

@@ -72,7 +72,9 @@ body {
   -webkit-user-select: none;
   cursor: default;
 }
-.panel-topbar .panel-tabs {
+/* Die rechte Gruppe beginnt mit der Schriftgrößen-Wippe, wie im Terminal;
+   das `auto` trägt deshalb sie, die Tabs folgen hinter dem Trenner. */
+.panel-topbar #zoom-anker {
   margin-left: auto;
 }
 /* Projekt-Icon und Titel links, wie im Terminal-Fenster. */
@@ -482,4 +484,35 @@ body {
   #panel-content {
     overflow: visible;
   }
+}
+
+/* Schriftgrößen-Wippe in der Kopfleiste: eine liegende Kapsel, − Maßstab +.
+   Der Maßstab steht immer da und hat feste Breite — sonst rückten die Knöpfe
+   beim Wechsel von 100 % auf 90 % zur Seite. */
+.zoom-wippe {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0;
+  background: var(--line);
+  border-radius: 8px;
+  padding: 1px;
+}
+.zoom-btn {
+  width: 1.9em;
+  padding: 4px 0;
+  justify-content: center;
+  color: var(--text);
+  font-weight: 600;
+}
+.zoom-btn:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.zoom-wert {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  width: 3.6em;
+  text-align: center;
 }

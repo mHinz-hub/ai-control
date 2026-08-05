@@ -334,10 +334,13 @@ fn invoke_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send +
     terminal::todos_add,
     terminal::todos_update,
     terminal::panel_set,
+    terminal::panel_clear,
     terminal::search_run,
     terminal::panel_load,
     terminal::wiki_open,
     terminal::archive_read,
+    terminal::archive_image,
+    terminal::open_image_window,
     terminal::epub_open,
     terminal::archive_write,
     terminal::archive_set_title,
@@ -353,6 +356,7 @@ fn invoke_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send +
     terminal::archive_create_doc,
     terminal::archive_create_html,
     terminal::archive_create_text,
+    terminal::search_spots,
     terminal::archive_write_text,
     terminal::archive_create_drawio,
     terminal::open_panel_window,
@@ -371,7 +375,14 @@ pub(crate) fn terminal_builder(project: String) -> tauri::Builder<tauri::Wry> {
     // den ganzen Dateipfad als EIN kodiertes Segment, womit die relativen
     // Verweise der Buchseiten (Bilder, CSS, Schriften) ins Leere liefen.
     .register_uri_scheme_protocol("epub", |_ctx, request| {
-      match crate::domain::epub::serve(request.uri().path()) {
+      // Pfad samt Query: In `?hit=…` stehen die Fundstellen der Suche, die
+      // beim Ausliefern markiert werden. Ohne die Query blieben sie liegen.
+      let uri = request.uri();
+      let adresse = match uri.query() {
+        Some(q) => format!("{}?{q}", uri.path()),
+        None => uri.path().to_string(),
+      };
+      match crate::domain::epub::serve(&adresse) {
         Ok((bytes, mime)) => tauri::http::Response::builder()
           .header(tauri::http::header::CONTENT_TYPE, mime)
           .body(bytes)

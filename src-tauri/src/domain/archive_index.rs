@@ -241,6 +241,103 @@ fn read_doc(home: &Path, path: &Path) -> Result<(Doc, String), String> {
   Ok((doc, indexed))
 }
 
+/// Ein Eintrag des Suchindex. Eine Notiz ergibt einen, ein Buch je Kapitel
+/// einen — nur so öffnet ein Treffer das Kapitel statt bloß das Buch.
+pub(crate) struct Teil {
+  /// Adresse innerhalb der Datei: leer bei Notizen, Kapitel-Href bei Büchern.
+  pub(crate) teil: String,
+  pub(crate) kind: &'static str,
+  /// Notiz-ID aus dem Frontmatter; leer, wo es keine gibt.
+  pub(crate) doc_id: String,
+  pub(crate) name: String,
+  pub(crate) title: String,
+  pub(crate) description: String,
+  pub(crate) tags: String,
+  pub(crate) body: String,
+  /// Druckseiten im Rumpf als `offset:seite` — leer, wo es keine gibt.
+  /// Nicht durchsucht, nur mitgeführt: daraus bekommt jede Fundstelle ihre
+  /// Seitenangabe.
+  pub(crate) seiten: String,
+}
+
+/// Alle Dateien des Archivs als relpaths, ohne sie zu lesen — Grundlage des
+/// Abgleichs, der nur `stat` kostet.
+pub(crate) fn dateien_im_archiv(home: &Path) -> Result<Vec<String>, String> {
+  let mut out = Vec::new();
+  sammle(home, home, &mut out)?;
+  out.sort();
+  Ok(out)
+}
+
+fn sammle(home: &Path, dir: &Path, out: &mut Vec<String>) -> Result<(), String> {
+  for entry in fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
+    let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
+    let path = entry.path();
+    if entry.file_name().to_string_lossy().starts_with('.') {
+      continue;
+    }
+    if path.is_dir() {
+      sammle(home, &path, out)?;
+    } else {
+      out.push(
+        path
+          .strip_prefix(home)
+          .map_err(|e| format!("{}: {e}", path.display()))?
+          .display()
+          .to_string(),
+      );
+    }
+  }
+  Ok(())
+}
+
+/// Was aus einer Datei in den Index geht. Bücher zerfallen in ihre Kapitel,
+/// alles andere ergibt genau einen Eintrag.
+pub(crate) fn teile_fuer_index(home: &Path, relpath: &str) -> Result<Vec<Teil>, String> {
+  let pfad = home.join(relpath);
+  let fname = pfad.file_name().unwrap_or_default().to_string_lossy().to_string();
+  if fname.ends_with(".epub") {
+    let (buchtitel, kapitel) = crate::domain::epub::kapitel(&pfad)?;
+    return Ok(
+      kapitel
+        .into_iter()
+        .map(|k| Teil {
+          teil: k.href,
+          kind: "epub",
+          doc_id: String::new(),
+          name: buchtitel.clone(),
+          title: k.titel,
+          description: String::new(),
+          tags: String::new(),
+          seiten: k
+            .seiten
+            .iter()
+            .map(|(pos, s)| format!("{pos}:{s}"))
+            .collect::<Vec<_>>()
+            .join(","),
+          body: k.text,
+        })
+        .collect(),
+    );
+  }
+  let (doc, body) = if fname.ends_with(".md") || fname.ends_with(".html") {
+    read_doc(home, &pfad)?
+  } else {
+    read_file_node(home, &pfad)?
+  };
+  Ok(vec![Teil {
+    teil: String::new(),
+    kind: doc.kind,
+    doc_id: doc.id,
+    name: doc.name,
+    title: doc.title,
+    description: doc.description.unwrap_or_default(),
+    tags: doc.tags.join(" "),
+    seiten: String::new(),
+    body,
+  }])
+}
+
 /// Slug-Vergleich eines Wikilink-Ziels gegen Name, Titel und Datei-Stem.
 fn matches(doc: &Doc, want: &str) -> bool {
   slugify(&doc.name) == want

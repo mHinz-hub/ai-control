@@ -1,27 +1,21 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "commit",
-  "description": "Commit-Fenster: Git-Zustand, Diffs, Commit und Push — keine PTY, keine Verwaltung.",
+  "identifier": "bild",
+  "description": "Bildfenster: zeigt ein Bild des Archivs — kein Schreiben, keine PTY, keine Verwaltung.",
   "windows": [
-    "commit-*"
+    "bild-*"
   ],
   "permissions": [
     "core:default",
     "core:webview:allow-set-webview-zoom",
     "core:window:allow-start-dragging",
-    "core:window:allow-set-size",
+    "core:window:allow-set-title",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
     "core:window:allow-start-resize-dragging",
-    "clipboard-manager:allow-write-text",
-    "allow-list-projects",
-    "allow-buffer-read",
+    "allow-archive-image",
     "allow-term-log",
-    "allow-git-repos",
-    "allow-git-diff",
-    "allow-git-push-check",
-    "allow-git-commit",
     "allow-window-buttons-left"
   ]
 }

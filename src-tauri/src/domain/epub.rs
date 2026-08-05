@@ -34,6 +34,9 @@ pub(crate) struct Book {
   pub(crate) title: String,
   pub(crate) creator: Option<String>,
   pub(crate) language: Option<String>,
+  /// Alle Angaben des Titelblatts in der Reihenfolge des OPF — Verlag, Jahr,
+  /// ISBN, Herausgeber, Übersetzer. Was ein Zitat braucht, steht hier.
+  pub(crate) meta: Vec<(String, String)>,
   /// `pre-paginated` (feste Seiten) oder `reflowable` (fließender Text).
   pub(crate) layout: String,
   /// Lesereihenfolge aus dem Spine — die Dateinamen im ZIP sagen sie nicht.
@@ -68,6 +71,101 @@ pub(crate) fn open(path: &Path) -> Result<Book, String> {
   open_in(&cache_root(), path)
 }
 
+/// Ein Kapitel für den Suchindex: seine Adresse im Buch und sein Lesetext.
+pub(crate) struct Kapitel {
+  /// Href relativ zur Buchwurzel — Adresse des Sprungs.
+  pub(crate) href: String,
+  /// Überschrift aus dem Inhaltsverzeichnis, sonst der Buchtitel.
+  pub(crate) titel: String,
+  pub(crate) text: String,
+  /// Druckseiten im Text: Zeichenposition → Seitenangabe, aufsteigend.
+  /// Grundlage der Zitierfähigkeit — eine Fundstelle liegt zwischen zwei
+  /// Marken und bekommt daraus ihre Seite.
+  pub(crate) seiten: Vec<(usize, String)>,
+}
+
+/// Text einer Kapitelseite ohne Markup, dazu die Positionen der
+/// Druckseitenmarken (`epub:type="pagebreak"`). `strip_tags` allein wirft sie
+/// weg — mit ihnen fiele der Seitenbezug jedes Zitats.
+fn text_mit_seiten(html: &str) -> (String, Vec<(usize, String)>) {
+  let mut out = String::with_capacity(html.len() / 2);
+  let mut seiten = Vec::new();
+  let mut rest = html;
+  while let Some(start) = rest.find('<') {
+    out.push_str(&rest[..start]);
+    let Some(ende) = rest[start..].find('>') else { break };
+    let tag = &rest[start..start + ende + 1];
+    if tag.contains("pagebreak") {
+      // Die Seitenzahl steht im Label, nicht im Text.
+      if let Some(l) = tag.find("aria-label=\"").map(|i| i + 12) {
+        if let Some(bis) = tag[l..].find('"') {
+          seiten.push((out.chars().count(), tag[l..l + bis].to_string()));
+        }
+      }
+    }
+    // Eine Formel steht als Baum aus Zeichen da; aneinandergereiht ergäben
+    // sie Unsinn — aus `³√2` würde `23`. Wie die Stelle im Text zu lesen ist,
+    // sagt ihr `alttext`.
+    let name = tag.trim_start_matches('<').trim_start_matches('/');
+    if name.starts_with("math") {
+      if let Some(l) = tag.find("alttext=\"").map(|i| i + 9) {
+        if let Some(bis) = tag[l..].find('"') {
+          out.push_str(&tag[l..l + bis]);
+        }
+      }
+      if let Some(e) = rest[start..].find("</math>") {
+        rest = &rest[start + e + 7..];
+        continue;
+      }
+    }
+    // Skript- und Stilblöcke tragen keinen Lesetext.
+    if name.starts_with("script") || name.starts_with("style") {
+      let zu = format!("</{}>", name.split([' ', '>']).next().unwrap_or(""));
+      if let Some(e) = rest[start..].find(&zu) {
+        rest = &rest[start + e + zu.len()..];
+        continue;
+      }
+    }
+    rest = &rest[start + ende + 1..];
+  }
+  out.push_str(rest);
+  (out, seiten)
+}
+
+/// Kapitel eines Buches in Lesereihenfolge, Text ohne Markup. Grundlage des
+/// Suchindex: ein Eintrag je Kapitel, damit ein Treffer das Kapitel öffnet
+/// und nicht bloß das Buch.
+pub(crate) fn kapitel(path: &Path) -> Result<(String, Vec<Kapitel>), String> {
+  let buch = open(path)?;
+  let wurzel = cache_root().join(&buch.key);
+  // Das Inhaltsverzeichnis benennt Kapitel über ihre Href (ggf. mit
+  // Fragment); für die Überschrift zählt der Teil davor.
+  let mut titel: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+  for t in &buch.toc {
+    let href = t.href.split('#').next().unwrap_or(&t.href);
+    titel.entry(href).or_insert(&t.title);
+  }
+  let mut out = Vec::new();
+  for seite in &buch.spine {
+    let (text, seiten) = match read_text(&wurzel.join(&seite.href)) {
+      Ok(t) => text_mit_seiten(&t),
+      // Eine Seite, die das ZIP nicht hergibt, ist kein Grund, das ganze
+      // Buch aus dem Index zu lassen.
+      Err(_) => continue,
+    };
+    if text.trim().is_empty() {
+      continue;
+    }
+    out.push(Kapitel {
+      href: seite.href.clone(),
+      titel: titel.get(seite.href.as_str()).map(|s| s.to_string()).unwrap_or_else(|| buch.title.clone()),
+      text,
+      seiten,
+    });
+  }
+  Ok((buch.title, out))
+}
+
 fn open_in(root: &Path, path: &Path) -> Result<Book, String> {
   let dir = ensure_unpacked(root, path)?;
   let key = dir.file_name().unwrap_or_default().to_string_lossy().to_string();
@@ -99,6 +197,7 @@ fn open_in(root: &Path, path: &Path) -> Result<Book, String> {
     title: pkg.title,
     creator: pkg.creator,
     language: pkg.language,
+    meta: pkg.meta,
     layout: pkg.layout,
     spine,
     toc,
@@ -230,6 +329,7 @@ struct Package {
   title: String,
   creator: Option<String>,
   language: Option<String>,
+  meta: Vec<(String, String)>,
   layout: String,
   manifest: Vec<Item>,
   spine: Vec<SpineRef>,
@@ -240,6 +340,7 @@ fn parse_opf(text: &str) -> Result<Package, String> {
   let mut reader = reader(text);
   let mut buf = Vec::new();
   let (mut title, mut creator, mut language) = (String::new(), None, None);
+  let mut meta: Vec<(String, String)> = Vec::new();
   let mut layout = "reflowable".to_string();
   let mut manifest = Vec::new();
   let mut spine = Vec::new();
@@ -284,6 +385,12 @@ fn parse_opf(text: &str) -> Result<Package, String> {
         if value.is_empty() {
           continue;
         }
+        // Die Angaben des Titelblatts stehen als Dublin-Core-Elemente im OPF;
+        // gesammelt werden sie alle, nicht nur die drei, die der Viewer in
+        // seiner Fußzeile führt.
+        if !matches!(open.as_slice(), b"meta" | b"package" | b"metadata") {
+          meta.push((String::from_utf8_lossy(&open).into_owned(), value.clone()));
+        }
         match open.as_slice() {
           b"title" if title.is_empty() => title = value,
           b"creator" if creator.is_none() => creator = Some(value),
@@ -301,21 +408,48 @@ fn parse_opf(text: &str) -> Result<Package, String> {
   if spine.is_empty() {
     return Err("kein Spine im OPF — keine Lesereihenfolge".into());
   }
-  Ok(Package { title, creator, language, layout, manifest, spine })
+  Ok(Package { title, creator, language, meta, layout, manifest, spine })
 }
 
-/// Nav-Dokument (EPUB 3): die erste `<ol>`-Verschachtelung im `nav`-Element
-/// ist das Inhaltsverzeichnis; die Tiefe der Listen ist die Gliederungsebene.
+/// Nav-Dokument (EPUB 3): das Inhaltsverzeichnis steht im `nav`-Element mit
+/// `epub:type="toc"`; die Tiefe der Listen ist die Gliederungsebene.
+///
+/// Nur dieses eine Element zählt. Daneben stehen im selben Dokument die
+/// Landmarken und die Seitenliste — letztere hat bei einem Buch mit
+/// Druckseitenmarken hunderte Einträge, die sonst als lauter Zahlen hinter
+/// den Kapiteln im Verzeichnis landen. Ein Nav ohne `epub:type` gilt als
+/// Inhaltsverzeichnis, solange keines mit `toc` gefunden wurde.
 fn parse_nav(text: &str, base: &str) -> Vec<TocItem> {
   let mut reader = reader(text);
   let mut buf = Vec::new();
-  let mut out = Vec::new();
+  let mut out: Vec<TocItem> = Vec::new();
   let mut depth = 0usize;
   let mut href: Option<String> = None;
   let mut label = String::new();
+  // Innerhalb welchen nav-Elements wir gerade sind und ob es ausdrücklich
+  // das Inhaltsverzeichnis ist.
+  let mut im_nav: Option<bool> = None;
+  let mut toc_gefunden = false;
   loop {
     match reader.read_event_into(&mut buf) {
       Ok(Event::Start(e)) => match local(e.name().as_ref()) {
+        b"nav" => {
+          let typ = attr(&e, b"epub:type").or_else(|| attr(&e, b"type"));
+          let ist_toc = match typ.as_deref() {
+            Some(t) => t.split_whitespace().any(|x| x == "toc"),
+            None => !toc_gefunden,
+          };
+          if ist_toc {
+            // Ein zweites Verzeichnis ersetzt kein vorhandenes; das
+            // ausdrückliche `toc` gewinnt gegen ein typloses davor.
+            if typ.is_some() && !toc_gefunden {
+              out.clear();
+            }
+            toc_gefunden = toc_gefunden || typ.is_some();
+          }
+          im_nav = Some(ist_toc);
+          depth = 0;
+        }
         b"ol" => depth += 1,
         b"a" => {
           href = attr(&e, b"href");
@@ -329,14 +463,17 @@ fn parse_nav(text: &str, base: &str) -> Vec<TocItem> {
         }
       }
       Ok(Event::End(e)) => match local(e.name().as_ref()) {
+        b"nav" => im_nav = None,
         b"ol" => depth = depth.saturating_sub(1),
         b"a" => {
           if let Some(h) = href.take() {
-            out.push(TocItem {
-              title: label.trim().to_string(),
-              href: join_rel(base, &h),
-              level: depth.saturating_sub(1),
-            });
+            if im_nav != Some(false) {
+              out.push(TocItem {
+                title: label.trim().to_string(),
+                href: join_rel(base, &h),
+                level: depth.saturating_sub(1),
+              });
+            }
           }
         }
         _ => {}
@@ -480,7 +617,12 @@ pub(crate) fn serve(url_path: &str) -> Result<(Vec<u8>, &'static str), String> {
 }
 
 fn serve_in(root: &Path, url_path: &str) -> Result<(Vec<u8>, &'static str), String> {
-  let rel = decode(url_path.split(['?', '#']).next().unwrap_or_default().trim_start_matches('/'));
+  let ohne_fragment = url_path.split('#').next().unwrap_or_default();
+  let (pfad_teil, query) = match ohne_fragment.split_once('?') {
+    Some((p, q)) => (p, Some(q)),
+    None => (ohne_fragment, None),
+  };
+  let rel = decode(pfad_teil.trim_start_matches('/'));
   let root = root
     .canonicalize()
     .map_err(|e| format!("{}: {e}", root.display()))?;
@@ -493,7 +635,231 @@ fn serve_in(root: &Path, url_path: &str) -> Result<(Vec<u8>, &'static str), Stri
     return Err(format!("außerhalb des Buch-Caches: {rel}"));
   }
   let bytes = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-  Ok((bytes, mime(&path)))
+  // Fundstellen der Suche werden beim Ausliefern eingesetzt. Der Reader zeigt
+  // Kapitel in einer leeren Sandbox — dort läuft kein Skript, das sie
+  // nachträglich markieren könnte, und die eigene Origin der Seite verwehrt
+  // jeden Zugriff von außen.
+  let woerter: Vec<String> = query
+    .and_then(|q| q.split('&').find_map(|p| p.strip_prefix("hit=")))
+    .map(|v| decode(v).split(',').map(str::to_string).filter(|w| !w.is_empty()).collect())
+    .unwrap_or_default();
+  let typ = mime(&path);
+  if typ == "application/xhtml+xml" {
+    if let Ok(text) = String::from_utf8(bytes.clone()) {
+      let text = if woerter.is_empty() { text } else { markiere(&text, &woerter) };
+      return Ok((mit_blaetterhilfe(&text).into_bytes(), typ));
+    }
+  }
+  Ok((bytes, typ))
+}
+
+/// Das Skript, das der Reader in jede Buchseite legt.
+///
+/// Der Viewer läuft auf `tauri://localhost`, die Seite auf `epub://localhost`
+/// — verschiedene Protokolle, also verschiedene Ursprünge. Von außen ist an
+/// den Scrollstand der Seite darum nicht heranzukommen, und ohne ihn gäbe es
+/// kein Blättern innerhalb eines Kapitels: jeder Tastendruck spränge ins
+/// nächste. Die Seite sagt ihn selbst, über `postMessage`.
+///
+/// Die Kapitel sind XHTML, also XML: `nodeName` kommt dort klein zurück
+/// (`a`, nicht `A`). Elementnamen darum immer klein vergleichen.
+const BLAETTERN: &str = "(function(){\
+function e(){return document.scrollingElement||document.documentElement}\
+function s(){var x=e();return{oben:x.scrollTop,rand:x.scrollHeight-x.clientHeight}}\
+var seitig=false,zeiger=0,urtext=null,skala=1;\
+function alle(w){var q=w.querySelectorAll('[role=\"doc-pagebreak\"]'),l=[],i;\
+for(i=0;i<q.length;i++)l.push(q[i]);return l}\
+function marken(){return alle(urtext||document)}\
+function hier(){var mk=alle(document),i,n=-1;\
+for(i=0;i<mk.length;i++)if(mk[i].getBoundingClientRect().top<=8)n=i;return n}\
+function offen(){var mk=alle(document),i,l=[],h=e().clientHeight,t,u;\
+for(i=0;i<mk.length;i++){t=mk[i].getBoundingClientRect().top;\
+u=i+1<mk.length?mk[i+1].getBoundingClientRect().top:1e9;\
+if(u>0&&t<h)l.push(mk[i].getAttribute('aria-label'))}\
+return l}\
+function m(){var v=s(),mk=marken(),i=seitig?zeiger:hier(),o=offen(),g=seitig?grenzen():[];\
+if(seitig&&g[i])o=[g[i].l];\
+parent.postMessage({ac:'stand',oben:v.oben,rand:v.rand,seitig:seitig,seiten:o,\
+seite:seitig?(g[i]?g[i].l:''):(i<0||!mk[i]?'':mk[i].getAttribute('aria-label')),\
+von:i+1,bis:seitig?g.length:mk.length},'*')}\
+function sichern(){if(urtext)return;\
+urtext=document.createDocumentFragment();\
+while(document.body.firstChild)urtext.appendChild(document.body.firstChild)}\
+function heilen(){if(!urtext)return;\
+document.body.textContent='';document.body.appendChild(urtext);urtext=null}\
+function stellen(an){var b=document.body,h=document.documentElement;\
+if(!an){seitig=false;skala=1;b.style.transform='';b.style.transformOrigin='';\
+b.style.height='';h.style.overflow='';heilen();m();return}\
+var nah=hier();sichern();seitig=true;zeigeSeite(nah<0?0:nah)}\
+function grenzen(){var mk=marken(),g=[],i,r;\
+if(!mk.length)return g;\
+r=document.createRange();r.setStart(urtext,0);r.setEndBefore(mk[0]);\
+if(String(r).replace(/[\\s\\u00a0]/g,''))\
+g.push({k:null,l:String(parseInt(mk[0].getAttribute('aria-label'),10)-1)});\
+for(i=0;i<mk.length;i++)g.push({k:mk[i],l:mk[i].getAttribute('aria-label')});\
+return g}\
+function zeigeSeite(i){var b=document.body,h=document.documentElement,g=grenzen();\
+if(!g.length){stellen(false);return}\
+zeiger=Math.max(0,Math.min(g.length-1,i));\
+var r=document.createRange();\
+if(g[zeiger].k)r.setStartBefore(g[zeiger].k);else r.setStart(urtext,0);\
+if(zeiger+1<g.length)r.setEndBefore(g[zeiger+1].k);\
+else r.setEnd(urtext,urtext.childNodes.length);\
+var kasten=document.createElement('div');kasten.appendChild(r.cloneContents());\
+var noten=kasten.querySelectorAll('.footnotes'),q;\
+for(q=0;q<noten.length;q++)noten[q].parentNode.removeChild(noten[q]);\
+b.style.transform='';b.style.height='';skala=1;\
+b.textContent='';b.appendChild(kasten);\
+h.style.overflow='hidden';e().scrollTop=0;\
+var bt=b.getBoundingClientRect().top,luft=32,\
+kt=kasten.getBoundingClientRect(),\
+tief=kt.top-bt+kt.height,frei=e().clientHeight-bt-luft;\
+if(tief>frei){skala=frei/tief;\
+b.style.transformOrigin='0 0';b.style.transform='scale('+skala+')'}\
+var u=kasten.getBoundingClientRect().bottom,ziel=e().clientHeight-luft;\
+if(u>ziel+0.5){skala=skala*(ziel-bt)/(u-bt);\
+b.style.transformOrigin='0 0';b.style.transform='scale('+skala+')'}\
+var bilder=kasten.querySelectorAll('img'),z;\
+for(z=0;z<bilder.length;z++)if(!bilder[z].complete)\
+bilder[z].addEventListener('load',function(){if(seitig)zeigeSeite(zeiger)});\
+m()}\
+addEventListener('message',function(ev){var d=ev.data||{},x=e(),v=s();\
+if(d.ac==='blaettern'){\
+if(seitig){if(d.richtung>0&&zeiger+1<grenzen().length){zeigeSeite(zeiger+1);return}\
+if(d.richtung<0&&zeiger>0){zeigeSeite(zeiger-1);return}\
+parent.postMessage({ac:'rand',richtung:d.richtung},'*');return}\
+var w=x.clientHeight*0.9;\
+if(d.richtung>0&&v.oben<v.rand-2){x.scrollTop=Math.min(v.rand,v.oben+w);m();return}\
+if(d.richtung<0&&v.oben>2){x.scrollTop=Math.max(0,v.oben-w);m();return}\
+parent.postMessage({ac:'rand',richtung:d.richtung},'*')}\
+else if(d.ac==='anDenFuss'){if(seitig){zeigeSeite(grenzen().length-1);return}\
+x.scrollTop=x.scrollHeight;m()}\
+else if(d.ac==='schrift'){document.documentElement.style.fontSize=d.wert+'%';\
+if(seitig)zeigeSeite(zeiger);else m()}\
+else if(d.ac==='seitig'){stellen(!!d.an)}\
+else if(d.ac==='marker'){document.documentElement.className=\
+d.an?'ac-marken':'';if(seitig)zeigeSeite(zeiger);else m()}\
+else if(d.ac==='marke'){if(seitig){var g=grenzen(),j;\
+for(j=0;j<g.length;j++)if(g[j].k&&g[j].k.id===d.id){zeigeSeite(j);return}\
+zeigeSeite(zeiger);return}\
+var z=document.getElementById(d.id);if(z)z.scrollIntoView();m()}});\
+addEventListener('scroll',m,{passive:true});\
+addEventListener('load',m);\
+if(window.requestAnimationFrame)requestAnimationFrame(m);\
+addEventListener('resize',function(){if(seitig)zeigeSeite(zeiger)});\
+addEventListener('keydown',function(ev){\
+var k=ev.key;\
+if(k!=='ArrowRight'&&k!=='ArrowLeft'&&k!=='PageDown'&&k!=='PageUp')return;\
+ev.preventDefault();\
+parent.postMessage({ac:'taste',key:k,shift:ev.shiftKey},'*')});\
+var stil=document.createElement('style');\
+stil.textContent='html.ac-marken [role=\"doc-pagebreak\"]::after{'+\
+'content:\"|\" attr(aria-label);font-size:0.68em;vertical-align:0.42em;'+\
+'color:#1d7fd6;opacity:0.85;padding:0 0.18em;white-space:nowrap}'+\
+'#ac-note{position:absolute;left:8%;right:8%;z-index:9;'+\
+'background:#fffdf5;border:1px solid #c9c3b0;border-radius:6px;'+\
+'box-shadow:0 6px 18px rgba(0,0,0,.18);padding:0.6em 0.9em;'+\
+'font-size:0.88em}'+\
+'#ac-note hr,#ac-note .footnote-back{display:none}';\
+document.head.appendChild(stil);\
+function notiz(){var k=document.getElementById('ac-note');\
+if(k)k.parentNode.removeChild(k)}\
+function istA(x){return !!x&&String(x.nodeName||'').toLowerCase()==='a'}\
+addEventListener('click',function(ev){var a=ev.target,i;\
+for(i=0;i<4&&a&&!istA(a);i++)a=a.parentNode;\
+if(!istA(a)){notiz();return}\
+var h=a.getAttribute('href')||'';\
+if(h.charAt(0)!=='#'){notiz();return}\
+var ziel=null,q=(urtext||document).querySelectorAll('[id]'),j;\
+for(j=0;j<q.length;j++)if(q[j].id===h.slice(1)){ziel=q[j];break}\
+if(!ziel||!/doc-footnote|footnote/.test(ziel.getAttribute('role')+' '+ziel.className)){notiz();return}\
+ev.preventDefault();notiz();\
+var k=document.createElement('div');k.id='ac-note';\
+k.appendChild(ziel.cloneNode(true));\
+var r=a.getBoundingClientRect();\
+k.style.top=(r.bottom+e().scrollTop+6)+'px';\
+document.body.appendChild(k)});\
+addEventListener('keydown',function(ev){if(ev.key==='Escape')notiz()});\
+addEventListener('contextmenu',function(ev){\
+var w=window.getSelection?String(window.getSelection()):'';\
+if(!w)ev.preventDefault()});m()})()";
+
+/// Setzt das Blätter-Skript in die Seite und sperrt zugleich jedes andere:
+/// Das Buch läuft mit `allow-scripts`, damit dieses eine arbeiten kann — die
+/// Regel mit dem Einmalwert lässt kein zweites zu. Ein fremdes ePub bringt
+/// damit nichts zur Ausführung.
+fn mit_blaetterhilfe(text: &str) -> String {
+  let einmal = digest(&format!("{:?}{}", std::time::SystemTime::now(), text.len()));
+  let kopf = format!(
+    "<meta http-equiv=\"Content-Security-Policy\" \
+     content=\"script-src 'nonce-{einmal}'; object-src 'none'\"/>"
+  );
+  // Die Kapitel sind XHTML, kein HTML: dort ist `&` der Anfang einer Entität
+  // und `<` der eines Tags. Ohne CDATA bräche der Parser am ersten `&&` des
+  // Skripts ab und zeigte statt der Seite seine Fehlermeldung.
+  let skript = format!("<script nonce=\"{einmal}\">//<![CDATA[\n{BLAETTERN}\n//]]></script>");
+  // Die Regel muss vor allem stehen, was sie treffen soll; das eigene Skript
+  // darf ans Ende des Kopfes.
+  let mit_regel = match text.find("<head>") {
+    Some(k) => format!("{}{kopf}{}", &text[..k + 6], &text[k + 6..]),
+    None => format!("{kopf}{text}"),
+  };
+  match mit_regel.find("</head>") {
+    Some(k) => format!("{}{skript}{}", &mit_regel[..k], &mit_regel[k..]),
+    None => format!("{mit_regel}{skript}"),
+  }
+}
+
+/// Umschließt die Wörter im Text des Dokuments mit `<mark class="ac-hit">`;
+/// die erste Marke bekommt `id="ac-hit"`, damit der Reader über das Fragment
+/// dorthin springt. Markup bleibt unangetastet: Verglichen wird nur zwischen
+/// den spitzen Klammern.
+pub(crate) fn markiere(text: &str, woerter: &[String]) -> String {
+  let klein = text.to_lowercase();
+  let gesucht: Vec<String> = woerter.iter().map(|w| w.to_lowercase()).collect();
+  let bytes = text.as_bytes();
+  let mut out = String::with_capacity(text.len() + 256);
+  let mut i = 0usize;
+  let mut im_tag = false;
+  let mut erste = true;
+  while i < bytes.len() {
+    match bytes[i] {
+      b'<' => im_tag = true,
+      b'>' => im_tag = false,
+      _ => {}
+    }
+    if im_tag || bytes[i] == b'>' {
+      out.push(bytes[i] as char);
+      i += 1;
+      continue;
+    }
+    let treffer = gesucht
+      .iter()
+      .find(|w| klein[i..].starts_with(w.as_str()) && text.is_char_boundary(i + w.len()));
+    match treffer {
+      Some(w) => {
+        let id = if erste { " id=\"ac-hit\"" } else { "" };
+        erste = false;
+        out.push_str(&format!("<mark class=\"ac-hit\"{id}>{}</mark>", &text[i..i + w.len()]));
+        i += w.len();
+      }
+      None => {
+        let start = i;
+        i += 1;
+        while i < bytes.len() && !text.is_char_boundary(i) {
+          i += 1;
+        }
+        out.push_str(&text[start..i]);
+      }
+    }
+  }
+  // Farbe mitliefern: Das Kapitel bringt sein eigenes Stylesheet mit, unseres
+  // erreicht es nicht.
+  let stil = "<style>mark.ac-hit{background:#f9e2af;color:#1e1e2e}</style>";
+  match out.find("</head>") {
+    Some(k) => format!("{}{stil}{}", &out[..k], &out[k..]),
+    None => format!("{stil}{out}"),
+  }
 }
 
 /// Prozent-Dekodierung des URL-Pfads (Leerzeichen, Umlaute in Dateinamen).
@@ -603,6 +969,93 @@ mod tests {
     assert_eq!(toc[1].level, 1);
     assert_eq!(toc[1].href, "text/kap1.xhtml#a");
     assert_eq!(toc[2].level, 0);
+  }
+
+  /// Seitenliste und Landmarken stehen im selben Dokument wie das
+  /// Inhaltsverzeichnis. Ein Buch mit Druckseitenmarken bringt hunderte
+  /// Zahlen mit — die gehören nicht ins Verzeichnis.
+  /// Fundstellen werden im Text markiert, nicht im Markup — ein Wort, das
+  /// zufällig in einem Attribut steht, bleibt unangetastet. Die erste Marke
+  /// trägt die Sprungmarke.
+  #[test]
+  fn markiert_nur_den_text() {
+    let seite = r#"<html><head><title>T</title></head><body>
+      <p class="kessel">Der Kessel und der kessel.</p></body></html>"#;
+    let out = markiere(seite, &["kessel".to_string()]);
+    assert_eq!(out.matches("<mark").count(), 2, "{out}");
+    assert!(out.contains(r#"<mark class="ac-hit" id="ac-hit">Kessel</mark>"#), "{out}");
+    // Das Klassen-Attribut bleibt, wie es war.
+    assert!(out.contains(r#"<p class="kessel">"#), "{out}");
+    // Die Farbe reist mit, das Kapitel bringt unser Stylesheet nicht mit.
+    assert!(out.contains("mark.ac-hit{"), "{out}");
+  }
+
+  /// Eine Formel geht als das in den Index, was sie im Text bedeutet — nicht
+  /// als die Ziffernfolge ihres Baums.
+  #[test]
+  fn formel_kommt_als_lesbare_stelle_in_den_index() {
+    let seite = r#"<html><body><p>die Zahl <math xmlns="http://www.w3.org/1998/Math/MathML"
+      alttext="³√2"><mroot><mn>2</mn><mn>3</mn></mroot></math> als Lösung</p></body></html>"#;
+    let (text, _) = text_mit_seiten(seite);
+    assert!(text.contains("die Zahl ³√2 als Lösung"), "{text}");
+    assert!(!text.contains("23"), "{text}");
+  }
+
+  /// Das Blätter-Skript reist mit jeder Buchseite; die Regel davor läßt genau
+  /// dieses eine zu und sperrt aus, was das ePub selbst mitbringt.
+  #[test]
+  fn blaetterhilfe_kommt_mit_eigener_regel() {
+    let seite = "<html><head><title>T</title></head><body><p>Text</p></body></html>";
+    let out = mit_blaetterhilfe(seite);
+    let einmal = out
+      .split("nonce-")
+      .nth(1)
+      .and_then(|s| s.split('\'').next())
+      .expect("Einmalwert in der Regel");
+    assert!(out.contains(&format!("<script nonce=\"{einmal}\">")), "{out}");
+    assert!(out.contains("Content-Security-Policy"), "{out}");
+    // Die Regel steht vor dem Skript, sonst träfe sie es nicht.
+    assert!(out.find("Content-Security-Policy") < out.find("<script"), "{out}");
+    assert!(out.contains("<p>Text</p>"), "{out}");
+    // Zwei Seiten teilen ihren Einmalwert nicht.
+    assert!(!mit_blaetterhilfe(seite).contains(einmal));
+  }
+
+  #[test]
+  fn nav_nimmt_nur_das_inhaltsverzeichnis() {
+    let nav = r#"<html><body>
+      <nav epub:type="toc"><ol>
+        <li><a href="text/kap1.xhtml">Erstes</a></li>
+      </ol></nav>
+      <nav epub:type="landmarks"><ol>
+        <li><a href="text/cover.xhtml" epub:type="cover">Cover</a></li>
+      </ol></nav>
+      <nav epub:type="page-list"><ol>
+        <li><a href="text/kap1.xhtml#page9">9</a></li>
+        <li><a href="text/kap1.xhtml#page10">10</a></li>
+      </ol></nav>
+    </body></html>"#;
+    let toc = parse_nav(nav, "");
+    assert_eq!(toc.len(), 1);
+    assert_eq!(toc[0].title, "Erstes");
+  }
+
+  /// Ohne `epub:type` gilt das erste Verzeichnis; taucht später eines mit
+  /// `toc` auf, gewinnt dieses.
+  #[test]
+  fn nav_ohne_typ_gilt_als_verzeichnis() {
+    let ohne = r#"<html><body><nav><ol>
+      <li><a href="k1.xhtml">Erstes</a></li>
+    </ol></nav></body></html>"#;
+    assert_eq!(parse_nav(ohne, "").len(), 1);
+
+    let beides = r#"<html><body>
+      <nav><ol><li><a href="k0.xhtml">Vorspann</a></li></ol></nav>
+      <nav epub:type="toc"><ol><li><a href="k1.xhtml">Erstes</a></li></ol></nav>
+    </body></html>"#;
+    let toc = parse_nav(beides, "");
+    assert_eq!(toc.len(), 1);
+    assert_eq!(toc[0].title, "Erstes");
   }
 
   #[test]

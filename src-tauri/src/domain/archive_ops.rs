@@ -49,6 +49,22 @@ pub(crate) fn file_path(home: &Path, relpath: &str) -> Result<PathBuf, String> {
   Ok(path)
 }
 
+/// Der MIME-Typ einer Bilddatei, oder None, wenn es keine ist. Entscheidet,
+/// was die Übersicht als Vorschau zeigt und was das Bildfenster öffnet.
+pub(crate) fn bild_mime(path: &Path) -> Option<&'static str> {
+  let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+  Some(match ext.as_str() {
+    "png" => "image/png",
+    "jpg" | "jpeg" => "image/jpeg",
+    "gif" => "image/gif",
+    "svg" => "image/svg+xml",
+    "webp" => "image/webp",
+    "avif" => "image/avif",
+    "bmp" => "image/bmp",
+    _ => return None,
+  })
+}
+
 /// Ist die Datei eine HTML-Notiz?
 fn is_html(path: &Path) -> bool {
   path.extension().is_some_and(|e| e == "html")
@@ -469,6 +485,17 @@ fn write_node_text(path: &Path, title: &str, project_name: &str) -> Result<(), S
 mod tests {
   use super::*;
   use crate::domain::testutil::tmp_paths;
+
+  /// Was das Archiv als Bild anzeigt, entscheidet die Endung — und zwar
+  /// unabhängig von ihrer Schreibweise.
+  #[test]
+  fn bild_mime_kennt_die_gaengigen_endungen() {
+    assert_eq!(bild_mime(Path::new("a/figur.png")), Some("image/png"));
+    assert_eq!(bild_mime(Path::new("a/Figur.JPG")), Some("image/jpeg"));
+    assert_eq!(bild_mime(Path::new("a/z.svg")), Some("image/svg+xml"));
+    assert_eq!(bild_mime(Path::new("a/notiz.md")), None);
+    assert_eq!(bild_mime(Path::new("ohne_endung")), None);
+  }
 
   fn archiv() -> PathBuf {
     let home = tmp_paths().home.join("archiv");

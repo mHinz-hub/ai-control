@@ -2,17 +2,20 @@ import "./panel-window.css";
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { wirePanel } from "./panel-wiring";
 import { flash, panelToast } from "./tiles";
 import { initArchiveForm } from "./archive-form";
 import { applyTheme, THEMES } from "./themes";
 import { applyI18n, t } from "./messages";
+import { initZoom } from "./zoom";
 
 // Abgelöstes Panel-Fenster: liest den aktuellen Entwurf einmal ein und folgt
 // danach denselben Update-Events wie das angedockte Panel; startet in
 // „Befehle", wenn es (noch) keinen Entwurf gibt.
 applyI18n();
+initZoom(document.getElementById("zoom-anker")!, "panel");
 const project = new URLSearchParams(location.search).get("project")!;
 const win = getCurrentWebviewWindow();
 
@@ -102,7 +105,10 @@ if (cfg?.terminal.icon) {
 document.documentElement.style.background = picked.header;
 document.body.style.background = picked.header;
 
-const { view, mode, draft } = await wirePanel(project, undefined, true);
+// Welche Fläche dieses Fenster zeigt, sagt der Öffner: das Archiv (Wiki und
+// Suche) oder die Sitzung (Entwurf, Befehle, Aufgaben).
+const flaeche = new URLSearchParams(location.search).get("flaeche") ?? "archiv";
+const { view, mode, draft } = await wirePanel(project, undefined, true, flaeche);
 // Das Panel-Fenster ist die Archiv-Fläche: gewünschter Tab aus der URL,
 // sonst das Archiv; ein hereingereichter Entwurf (Bearbeiten) gewinnt.
 const initialMode = new URLSearchParams(location.search).get("mode");
@@ -176,12 +182,20 @@ archiveBtn.addEventListener("click", () => archiveForm.toggle());
 // gewünschten Tab schalten (das Fokussieren macht der Kern).
 await win.listen<string>("panel-mode", (e) => mode.to(e.payload));
 
-// Andocken gibt es nicht mehr — die Flächen sind fest verteilt (Session-Tabs
-// im Dock, Archiv hier); der Knopf bleibt versteckt.
-document.getElementById("panel-dock")!.hidden = true;
+// Andocken: die Sitzungsfläche geht in das Dock des Terminal-Fensters zurück
+// — mit dem Tab, der hier zuletzt offen war. Das Archiv hat kein Dock, dort
+// bleibt der Knopf versteckt.
+const dockBtn = document.getElementById("panel-dock")!;
+dockBtn.hidden = flaeche !== "sitzung";
+dockBtn.addEventListener("click", async () => {
+  await emit("panel-attached", mode.current() ?? "commands");
+  await win.close();
+});
 
 // „Schließen": Fenster zu, ohne wieder anzudocken (Panel bleibt aus, bis ein
-// neuer Entwurf kommt).
-document
-  .getElementById("panel-close")!
-  .addEventListener("click", () => win.close());
+// neuer Entwurf kommt). Stand der Entwurf vorn, ist er damit verworfen — der
+// leere Puffer nimmt seinen Reiter überall mit.
+document.getElementById("panel-close")!.addEventListener("click", async () => {
+  if (mode.current() === "draft") await invoke("panel_clear", { project });
+  await win.close();
+});

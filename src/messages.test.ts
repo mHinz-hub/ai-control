@@ -36,6 +36,8 @@ describe("Nachrichtentabellen", () => {
       "Theme",
       "Wiki",
       "ToDo",
+      // Kurzform des ToDo-Tabs — in beiden Sprachen derselbe Buchstabe.
+      "T",
       "MD",
       "Autostart",
       "Input",

@@ -10,10 +10,14 @@
       <span id="project-name" data-tauri-drag-region></span>
       <span id="pool-sep">@</span>
       <span id="pool"></span>
+      <!-- Rechte Leiste: Schriftgröße │ Dateien │ Tabs. -->
+      <div class="zoom-anker" id="zoom-anker"></div>
+      <span class="tab-sep"></span>
       <!-- Dateien wählen und als Pfade ins Prompt schreiben. -->
       <button class="panel-btn" id="term-files" data-i18n-title="panel.pickFiles">
         <svg width="14" height="14" viewBox="0 0 16 16"><path d="M13 7.5 8 12.5a3 3 0 0 1-4.2-4.2l5.5-5.5a2 2 0 0 1 2.8 2.8l-5.5 5.5a1 1 0 0 1-1.4-1.4l5-5" /></svg>
       </button>
+      <span class="tab-sep"></span>
       <!-- Tabs kommen aus der Modul-Registry (panel-wiring). -->
       <div class="panel-tabs" id="panel-tabs"></div>
       <div id="winbtns">

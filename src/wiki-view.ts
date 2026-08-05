@@ -99,6 +99,10 @@ export interface WikiCallbacks {
   /// Buch öffnen: entpacken und Lesereihenfolge, Inhaltsverzeichnis und
   /// Metadaten aus seinen Verwaltungsdateien holen.
   openEpub(id: string): Promise<EpubBook>;
+  /// Bild als `data:`-Adresse — Vorschau in der Liste und Inhalt der Ansicht.
+  readImage(id: string): Promise<string>;
+  /// Bild in einem eigenen Fenster öffnen.
+  openImage(id: string): void;
   /// Anzeige-Titel einer Notiz setzen (Klick auf den Titel).
   setTitle(id: string, title: string): void;
   /// Wiki-Ziel laden (`tag:` = Übersicht in den Puffer, Einstiegs-Chip).
@@ -107,6 +111,10 @@ export interface WikiCallbacks {
   takePending?(): string | null;
   /// Wörter des Suchtreffers — sie werden im geöffneten Dokument markiert.
   takeMarks?(): string[];
+  /// Kapitel des Treffers (Buch) — leer bei allem anderen.
+  takePart?(): string;
+  /// Nummer der gemeinten Fundstelle; 0 = die erste.
+  takeSpot?(): number;
   actions: WikiActions;
 }
 
@@ -433,13 +441,45 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     return span;
   }
 
-  /// Übersichts-Symbol einer Datei: Typ aus Notiz-Art bzw. Datei-Endung.
+  const BILDENDUNGEN = ["png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "bmp"];
+
+  /// Ist die Datei ein Bild? Entscheidet über Vorschau, Ansicht und Fenster.
+  function istBild(doc: DocEntry): boolean {
+    if (doc.kind !== "file") return false;
+    const ext = doc.relpath.toLowerCase().split(".").pop() ?? "";
+    return BILDENDUNGEN.includes(ext);
+  }
+
+  /// Vorschauen laden erst, wenn ihre Zeile ins Blickfeld kommt: ein Ordner
+  /// mit hundert Ausschnitten soll die Übersicht nicht aufhalten.
+  const vorschauSicht = new IntersectionObserver((eintraege) => {
+    for (const e of eintraege) {
+      if (!e.isIntersecting) continue;
+      const el = e.target as HTMLImageElement;
+      vorschauSicht.unobserve(el);
+      cb.readImage(el.dataset.doc!).then(
+        (daten) => (el.src = daten),
+        () => el.classList.add("wiki-tree-thumb-leer"),
+      );
+    }
+  });
+
+  /// Übersichts-Symbol einer Datei: Typ aus Notiz-Art bzw. Datei-Endung. Ein
+  /// Bild zeigt sich selbst — bei Zeichnungen sagt das Symbol nichts, das
+  /// Bildchen alles.
   function docIcon(doc: DocEntry): HTMLElement {
     if (doc.kind === "md") return typeIcon("doc");
     if (doc.kind !== "file") return typeIcon(doc.kind);
     const ext = doc.relpath.toLowerCase().split(".").pop() ?? "";
     if (ext === "drawio") return typeIcon("diagram");
-    if (["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext)) return typeIcon("image");
+    if (BILDENDUNGEN.includes(ext)) {
+      const thumb = document.createElement("img");
+      thumb.className = "wiki-tree-thumb";
+      thumb.alt = "";
+      thumb.dataset.doc = doc.id;
+      vorschauSicht.observe(thumb);
+      return thumb;
+    }
     return typeIcon("file");
   }
 
@@ -775,6 +815,10 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   /// Für welche Notiz die Wörter gelten — beim Wechsel auf eine andere sind
   /// sie hinfällig.
   let fundstellenId = "";
+  /// Kapitel des Treffers, wenn er aus einem Buch stammt.
+  let fundstellenTeil = "";
+  /// Gemeinte Fundstelle innerhalb des Dokuments (0 = die erste).
+  let fundstelleNr = 0;
 
   /// Die markierten Stellen der offenen Anzeige — daraus bestimmt der
   /// Wechsel in den Editor, welche Fundstelle gemeint war.
@@ -786,7 +830,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     if (!fundstellen.length || selected !== fundstellenId) return;
     markiere(body, fundstellen);
     marken = [...body.querySelectorAll<HTMLElement>("mark.wiki-hit")];
-    marken[0]?.scrollIntoView({ block: "center" });
+    (marken[fundstelleNr] ?? marken[0])?.scrollIntoView({ block: "center" });
   }
 
   /// Nummer der Fundstelle, die beim Umschalten in den Editor im Bild stand:
@@ -876,6 +920,29 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
       },
     );
     return body;
+  }
+
+  /// Bild-Ansicht einer Bilddatei: das Bild in die Fläche eingepaßt, ein Klick
+  /// öffnet es im eigenen Fenster. Groß und nebeneinander gehört es dorthin —
+  /// hier steht es, damit die Auswahl in der Liste etwas zeigt.
+  function bildBody(doc: DocEntry): HTMLElement {
+    const box = document.createElement("div");
+    box.className = "wiki-note-bild";
+    const img = document.createElement("img");
+    img.alt = doc.title;
+    img.title = t("image.openWindow");
+    img.addEventListener("click", () => cb.openImage(doc.id));
+    cb.readImage(doc.id).then(
+      (daten) => (img.src = daten),
+      (e) => {
+        const fehler = document.createElement("div");
+        fehler.className = "wiki-note-error";
+        fehler.textContent = String(e);
+        box.replaceChildren(fehler);
+      },
+    );
+    box.append(img);
+    return box;
   }
 
   /// Diagramm-Ansicht einer `.drawio`-Datei: der gebündelte draw.io-Viewer
@@ -1052,13 +1119,30 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   /// Buchansicht statt Notiz-Body: der Viewer holt sich das entpackte Buch
   /// samt Lesereihenfolge und Inhaltsverzeichnis. Ladefehler (kaputtes ZIP,
   /// fehlendes OPF) stehen im Body, statt still zu verschwinden.
-  function epubBody(doc: DocEntry): HTMLElement {
+  function epubBody(doc: DocEntry, kopf: HTMLElement): HTMLElement {
     const box = document.createElement("div");
     box.className = "wiki-note-epub";
+    // Aus der Suche gekommen: Das Buch öffnet beim Kapitel des Treffers, und
+    // die Fundstellen darin sind markiert.
+    const sprung =
+      fundstellenTeil && fundstellen.length && selected === fundstellenId
+        ? { href: fundstellenTeil, woerter: [...fundstellen] }
+        : undefined;
     cb.openEpub(doc.id).then(
       (book) => {
         if (selected !== doc.id) return;
-        box.append(renderEpub(book));
+        const viewer = renderEpub(book, sprung);
+        box.append(viewer);
+        // Was das Buch als Ganzes betrifft — Auskunft, Schriftgrad, Verzeichnis,
+        // Tag und Nacht —, steht bei den übrigen Aktionen in der Titelzeile,
+        // vor dem Papierkorb, und trägt dort deren Größe. Nur das Blättern
+        // bleibt unten am Buch.
+        const leiste = kopf.querySelector(".wiki-note-actions");
+        const oben = [".epub-klapp", ".epub-seitig", ".epub-marker", ".epub-kleiner",
+                      ".epub-groesser", ".epub-info", ".epub-nacht"]
+          .map((sel) => viewer.querySelector(sel))
+          .filter((el): el is Element => !!el);
+        if (leiste && oben.length) leiste.prepend(...oben);
       },
       (e) => {
         box.textContent = String(e);
@@ -1180,7 +1264,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
         // Aus der Suche gekommen: dieselben Wörter markieren und zu der
         // Stelle springen, die beim Lesen im Bild stand.
         fundstellen: fundstellen.length
-          ? { woerter: fundstellen, nummer: sichtbareFundstelle() }
+          ? { woerter: fundstellen, nummer: marken.length ? sichtbareFundstelle() : fundstelleNr }
           : undefined,
         onChange: draw,
         onSave: save,
@@ -1278,6 +1362,15 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
         edit.textContent = "✎";
         edit.addEventListener("click", () => cb.openDrawio(doc.id));
         acts.push(edit);
+      }
+      // Ein Bild gehört groß und neben seinesgleichen — dafür das Fenster.
+      if (istBild(doc)) {
+        const fenster = document.createElement("button");
+        fenster.className = "panel-btn wiki-bild-fenster";
+        fenster.title = t("image.openWindow");
+        fenster.textContent = "⧉";
+        fenster.addEventListener("click", () => cb.openImage(doc.id));
+        acts.push(fenster);
       }
       // Textdateien (Klartext, JSON, YAML, XML) bearbeitet der Editor mit
       // der Grammatik ihrer Endung.
@@ -1436,7 +1529,8 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
       if (!doc) return;
       if (doc.kind === "epub") {
         main.classList.add("epub-mode");
-        main.append(noteHead(doc.title, metaParts(doc), docActions(doc)), epubBody(doc));
+        const kopf = noteHead(doc.title, metaParts(doc), docActions(doc));
+        main.append(kopf, epubBody(doc, kopf));
         return;
       }
       if (doc.kind === "file") {
@@ -1444,6 +1538,11 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
         // Öffnen ganz hineingezoomt, also scrollt hier nichts.
         if (istDrawio(doc)) {
           main.append(noteHead(doc.title, metaParts(doc), docActions(doc)), drawioBody(doc));
+          return;
+        }
+        // Ein Bild zeigt sich, statt seine Bytes als Text zu buchstabieren.
+        if (istBild(doc)) {
+          main.append(noteHead(doc.title, metaParts(doc), docActions(doc)), bildBody(doc));
           return;
         }
         const sprache = spracheZu(doc.relpath);
@@ -1609,6 +1708,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     // Fundstellen gelten für ihre Notiz; eine andere Auswahl räumt sie weg.
     if (target !== fundstellenId) {
       fundstellen = [];
+      fundstellenTeil = "";
       marken = [];
     }
     editing = false;
@@ -1694,6 +1794,8 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
       const pending = cb.takePending?.();
       if (pending && findDoc(pending)) {
         fundstellen = cb.takeMarks?.() ?? [];
+        fundstellenTeil = cb.takePart?.() ?? "";
+        fundstelleNr = cb.takeSpot?.() ?? 0;
         fundstellenId = pending;
         select(pending);
         return;

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-panel-clear"
+description = "Enables the panel_clear command without any pre-configured scope."
+commands.allow = ["panel_clear"]
+
+[[permission]]
+identifier = "deny-panel-clear"
+description = "Denies the panel_clear command without any pre-configured scope."
+commands.deny = ["panel_clear"]

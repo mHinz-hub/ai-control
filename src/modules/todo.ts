@@ -7,6 +7,7 @@ export const todoTab: PanelTab = {
   module: "todo",
   buffer: "todos",
   labelKey: "panel.tabTodo",
+  kurzKey: "panel.tabTodoKurz",
   titleKey: "panel.tabTodoTitle",
   init: (container, ctx) =>
     initTodoView(

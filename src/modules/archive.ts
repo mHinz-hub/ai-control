@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { t } from "../messages";
-import { initSearchView } from "../search-view";
+import { initSearchView, type SearchView } from "../search-view";
 import { initWikiView } from "../wiki-view";
 import type { PanelTab } from "./index";
 
@@ -12,6 +12,10 @@ let pendingSelect: string | null = null;
 /// Die Wörter des Treffers — die Archiv-Ansicht markiert sie im geöffneten
 /// Dokument und springt zur ersten Fundstelle.
 let pendingMarks: string[] = [];
+/// Kapitel des Treffers, wenn er aus einem Buch stammt.
+let pendingPart = "";
+/// Welche Fundstelle gemeint war — die Anzeige springt zu ihr.
+let pendingSpot = 0;
 
 export const wikiTab: PanelTab = {
   mode: "wiki",
@@ -48,6 +52,8 @@ export const wikiTab: PanelTab = {
       writeDoc: (id, text) => invoke("archive_write", { project: ctx.project, id, text }),
       writeFile: (id, text) => invoke("archive_write_text", { project: ctx.project, id, text }),
       openEpub: (id) => invoke("epub_open", { project: ctx.project, id }),
+      readImage: (id) => invoke("archive_image", { project: ctx.project, id }),
+      openImage: (id) => run("open_image_window", { id }),
       setTitle: (id, title) => run("archive_set_title", { id, title }),
       openWiki: ctx.openWiki,
       takePending: () => {
@@ -59,6 +65,16 @@ export const wikiTab: PanelTab = {
         const m = pendingMarks;
         pendingMarks = [];
         return m;
+      },
+      takePart: () => {
+        const p = pendingPart;
+        pendingPart = "";
+        return p;
+      },
+      takeSpot: () => {
+        const n = pendingSpot;
+        pendingSpot = 0;
+        return n;
       },
       actions: {
         remove: (id) => run("archive_delete", { id }),
@@ -104,17 +120,17 @@ export const searchTab: PanelTab = {
   popupOnly: true,
   labelKey: "panel.tabSearch",
   titleKey: "panel.tabSearchTitle",
-  // Trenner: Archiv-Fenster-Tabs (Archiv, Suche) links, Session-Tabs rechts.
-  sepAfter: true,
   // Treffer-Klick öffnet die Notiz im Archiv-Tab: relpath vormerken, die
   // Übersicht frisch laden — das wiki-update wechselt den Tab und die
   // Ansicht wählt die vorgemerkte Notiz aus.
   init: (container, ctx) =>
     initSearchView(
       container,
-      (_path, _relpath, id, marken) => {
+      (_path, _relpath, id, marken, teil, nr) => {
         pendingSelect = id;
         pendingMarks = marken;
+        pendingPart = teil;
+        pendingSpot = nr ?? 0;
         ctx.openWiki("tag:");
       },
       (raw) => {
@@ -126,5 +142,10 @@ export const searchTab: PanelTab = {
           ctx.toast(`Suche fehlgeschlagen: ${e}`),
         );
       },
+      (id, teil, query) =>
+        invoke("search_spots", { project: ctx.project, id, teil, query }),
     ),
+  // Der Tab wird einmal gebaut und danach nur ein- und ausgeblendet; der
+  // Fokus beim Bauen träfe also nur das erste Öffnen.
+  onActivate: (view) => (view as SearchView).focus(),
 };

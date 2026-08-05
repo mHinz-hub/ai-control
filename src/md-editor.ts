@@ -8,12 +8,19 @@
 /// hervor, und die Handgriffe (Betonung, Link, Liste, Tabelle) liegen auf
 /// Tasten.
 
+import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { json } from "@codemirror/lang-json";
+import { json, jsonParseLinter } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
 import { xml } from "@codemirror/lang-xml";
 import { yaml } from "@codemirror/lang-yaml";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import {
+  bracketMatching,
+  HighlightStyle,
+  indentOnInput,
+  indentUnit,
+  syntaxHighlighting,
+} from "@codemirror/language";
 import { EditorState, StateEffect, StateField, type Extension } from "@codemirror/state";
 import {
   Decoration,
@@ -23,7 +30,9 @@ import {
   highlightActiveLine,
   type DecorationSet,
 } from "@codemirror/view";
+import { linter, lintGutter } from "@codemirror/lint";
 import { tags } from "@lezer/highlight";
+import { load as yamlLoad } from "js-yaml";
 
 export interface MdEditor {
   el: HTMLElement;
@@ -174,6 +183,28 @@ const thema = EditorView.theme(
     "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
       backgroundColor: "color-mix(in srgb, var(--accent) 30%, transparent)",
     },
+    // Fehler der Prüfung: Wellenlinie im Text, Marke am Rand, Meldung in
+    // einem Kasten in den Fensterfarben.
+    ".cm-lintRange-error": {
+      backgroundImage: "none",
+      textDecoration: "underline wavy var(--err)",
+      textUnderlineOffset: "3px",
+    },
+    ".cm-gutters": { backgroundColor: "transparent", border: "none" },
+    ".cm-lint-marker-error": { color: "var(--err)" },
+    ".cm-tooltip.cm-tooltip-lint": {
+      backgroundColor: "var(--tile)",
+      border: "1px solid var(--line-strong)",
+      borderRadius: "6px",
+      color: "var(--text)",
+    },
+    ".cm-diagnostic-error": { borderLeftColor: "var(--err)" },
+    // Klammernpaar unter dem Cursor.
+    "&.cm-focused .cm-matchingBracket": {
+      backgroundColor: "color-mix(in srgb, var(--accent) 28%, transparent)",
+      outline: "1px solid var(--accent)",
+    },
+    "&.cm-focused .cm-nonmatchingBracket": { color: "var(--err)" },
     // Fundstellen der Suche — dieselbe Unterlegung wie in der Anzeige.
     ".cm-hit": {
       backgroundColor: "color-mix(in srgb, var(--warn) 40%, transparent)",
@@ -205,11 +236,73 @@ export function spracheZu(relpath: string): Sprache | null {
   return null;
 }
 
+/// Fehlerstelle einer Prüfung: Bereich im Text und Meldung.
+export interface Mangel {
+  von: number;
+  bis: number;
+  text: string;
+}
+
+/// YAML prüfen — der Parser meldet Zeile und Position im Text mit.
+export function yamlMangel(text: string): Mangel | null {
+  try {
+    yamlLoad(text);
+    return null;
+  } catch (e) {
+    const f = e as { reason?: string; message?: string; mark?: { position?: number } };
+    const von = Math.min(f.mark?.position ?? 0, Math.max(0, text.length - 1));
+    return { von, bis: Math.min(von + 1, text.length), text: f.reason ?? f.message ?? "YAML" };
+  }
+}
+
+/// XML prüfen. Der DOMParser liefert keine Position, sondern eine Meldung, in
+/// der bei WebKit „line N" steht — daraus wird die Zeile, sonst markiert der
+/// Mangel den Dokumentanfang.
+export function xmlMangel(text: string): Mangel | null {
+  if (!text.trim()) return null;
+  const dom = new DOMParser().parseFromString(text, "application/xml");
+  const fehler = dom.querySelector("parsererror");
+  if (!fehler) return null;
+  const meldung = (fehler.textContent ?? "XML").replace(/\s+/g, " ").trim();
+  const zeile = Number(/line (\d+)/i.exec(meldung)?.[1] ?? 0);
+  let von = 0;
+  if (zeile > 1) {
+    const zeilen = text.split("\n");
+    von = zeilen.slice(0, zeile - 1).join("\n").length + 1;
+  }
+  const bis = Math.min(text.indexOf("\n", von) < 0 ? text.length : text.indexOf("\n", von), text.length);
+  return { von: Math.min(von, text.length), bis: Math.max(bis, von), text: meldung };
+}
+
+/// Prüfung als CodeMirror-Linter: eine Wellenlinie an der Fundstelle, eine
+/// Marke am Rand. Ohne sie fällt ein Tippfehler erst auf, wenn die Datei
+/// gelesen wird.
+function pruefer(f: (text: string) => Mangel | null) {
+  return linter((view) => {
+    const m = f(view.state.doc.toString());
+    return m ? [{ from: m.von, to: m.bis, severity: "error" as const, message: m.text }] : [];
+  });
+}
+
+/// Schreibhilfen der Datenformate: Klammern und Anführungszeichen schließen
+/// sich selbst, die Einrückung folgt der Struktur (Zeile nach `{` oder einem
+/// Tag rückt ein, `}` rückt wieder aus), und das Gegenstück der Klammer unter
+/// dem Cursor wird hervorgehoben. Zwei Leerzeichen je Stufe — die Formate
+/// werden auch von Hand gelesen.
+const DATENHILFEN: Extension[] = [
+  lintGutter(),
+  closeBrackets(),
+  keymap.of(closeBracketsKeymap),
+  indentOnInput(),
+  bracketMatching(),
+  indentUnit.of("  "),
+];
+
 const GRAMMATIK: Record<Sprache, () => Extension[]> = {
   markdown: () => [markdown()],
-  json: () => [json()],
-  yaml: () => [yaml()],
-  xml: () => [xml()],
+  json: () => [json(), linter(jsonParseLinter()), ...DATENHILFEN],
+  yaml: () => [yaml(), pruefer(yamlMangel), ...DATENHILFEN],
+  xml: () => [xml(), pruefer(xmlMangel), ...DATENHILFEN],
   text: () => [],
 };
 
