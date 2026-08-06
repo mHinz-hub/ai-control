@@ -1,11 +1,11 @@
-/* Kachel- und Wiki-Ansichten des Panels (Befehls-History, Archiv-Suchtreffer,
-   Archiv-Wiki) — gemeinsam für das angedockte Panel (terminal.html) und das
+/* Kachel- und Archiv-Ansichten des Panels (Befehls-History, Archiv-Suchtreffer,
+   Archiv) — gemeinsam für das angedockte Panel (terminal.html) und das
    abgelöste Fenster (panel.html); von beiden Entry-Points importiert. */
 
 /* Abstand der scrollenden Flächen zur Fensterkante: das dekorationslose
    Fenster (Linux) legt dort 4 px breite Zieh-Zonen darüber. Klebt der
    Scrollbalken daran, springt der Zeiger beim Zielen zwischen „scrollen" und
-   „Fenstergröße". Der Wiki-Tab hat den Abstand über sein Padding. */
+   „Fenstergröße". Der Archiv-Reiter hat den Abstand über sein Padding. */
 :root[data-platform="other"] #commands-content,
 :root[data-platform="other"] #todo-content,
 :root[data-platform="other"] #search-content {
@@ -121,6 +121,20 @@
 #todo-content::-webkit-scrollbar-thumb {
   background: var(--line);
   border-radius: 4px;
+}
+/* Kachel mit Knopfleiste: die Knöpfe stehen oben rechts, der Text setzt
+   darunter an und läuft über die volle Breite — ohne Titel bliebe ihm sonst
+   nur die schmale Spalte neben den Knöpfen. */
+.cmd-tile:has(.tile-actions) {
+  flex-direction: column;
+  align-items: stretch;
+  padding-right: 10px;
+}
+.tile-actions {
+  order: -1;
+  display: flex;
+  align-self: flex-end;
+  gap: 6px;
 }
 .todo-text {
   font:
@@ -404,7 +418,7 @@
 /* Fundstelle im geöffneten Dokument: unterlegt, damit sie beim Überfliegen
    auffällt — anders als im Trefferausschnitt, wo die ganze Kachel schon die
    Fundstelle ist. */
-.wiki-note-body mark.wiki-hit {
+.archive-note-body mark.archive-hit {
   background: color-mix(in srgb, var(--warn) 40%, transparent);
   color: inherit;
   border-radius: 3px;
@@ -417,29 +431,29 @@
   font-size: 10px;
 }
 
-/* Wiki-Ansicht: Ordner-Baum links, flache Inhaltsliste rechts. */
+/* Archiv-Ansicht: Ordner-Baum links, flache Inhaltsliste rechts. */
 /* :not([hidden]): display:flex würde sonst das hidden-Attribut des
    Tab-Wechsels überstimmen — der Baum stünde im Such-Tab weiter da. */
-#wiki-content:not([hidden]) {
+#archive-content:not([hidden]) {
   flex: 1;
   min-height: 0;
   overflow: hidden;
   display: flex;
   padding: 14px 16px;
 }
-.wiki-tree::-webkit-scrollbar,
-.wiki-note-scroll::-webkit-scrollbar {
+.archive-tree::-webkit-scrollbar,
+.archive-note-scroll::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
-.wiki-tree::-webkit-scrollbar-thumb,
-.wiki-note-scroll::-webkit-scrollbar-thumb {
+.archive-tree::-webkit-scrollbar-thumb,
+.archive-note-scroll::-webkit-scrollbar-thumb {
   background: var(--line);
   border-radius: 4px;
 }
 /* Baum links, Seite rechts; beide Spalten scrollen unabhängig. Der Baum
    ist eine eigene Fläche, der Zieh-Griff dazwischen ist die Trennlinie. */
-.wiki-layout {
+.archive-layout {
   display: flex;
   align-items: stretch;
   gap: 0;
@@ -451,10 +465,10 @@
 }
 /* Mindestbreite der Inhaltsfläche (Regel 2.6): darunter scrollt die
    Fläche, statt Bedienelemente abzuschneiden. */
-.wiki-main {
+.archive-main {
   min-width: 34rem;
 }
-.wiki-tree {
+.archive-tree {
   flex: 0 0 230px;
   min-width: 0;
   min-height: 0;
@@ -466,17 +480,17 @@
 }
 /* Zieh-Griff zwischen Baum und Inhalt: schmal, mit sichtbarer Linie;
    beim Anfassen deutlich. */
-.wiki-splitter {
+.archive-splitter {
   flex: none;
   width: 7px;
   cursor: col-resize;
   border-left: 2px solid var(--line-strong);
   margin-left: 8px;
 }
-.wiki-splitter:hover {
+.archive-splitter:hover {
   border-left-color: var(--accent);
 }
-.wiki-main {
+.archive-main {
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -487,29 +501,29 @@
 }
 /* Der Inhalt unter der festen Knopfzeile scrollt — in beide Richtungen,
    wenn ein Diagramm breiter ist als das Fenster. */
-.wiki-note-scroll {
+.archive-note-scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
 }
-.wiki-tree .wiki-tree-children {
+.archive-tree .archive-tree-children {
   padding-left: 0;
   border-left: 2px solid var(--line-strong);
 }
 /* Wurzel-Ebene: Linie mittig unter dem Archiv-Knoten. */
-.wiki-tree > .wiki-tree-children {
+.archive-tree > .archive-tree-children {
   margin-left: 1em;
 }
 /* Ordner-Ebenen: Linie genauso mittig unter dem Ordner-Knoten (0.7em
    Zeilenbeginn + 1em). */
-.wiki-tree details > .wiki-tree-children {
+.archive-tree details > .archive-tree-children {
   margin-left: 1.7em;
 }
 /* Absatz zwischen Dokumenten und Ordner-Gruppe derselben Ebene. */
-.wiki-tree .wiki-tree-doc + details {
+.archive-tree .archive-tree-doc + details {
   margin-top: 3px;
 }
-.wiki-tree summary {
+.archive-tree summary {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -526,7 +540,7 @@
   -webkit-user-select: none;
 }
 /* Notiz-Blatt im Baum (Dokument ohne Kinder). */
-.wiki-tree-doc {
+.archive-tree-doc {
   display: flex;
   align-items: center;
   width: 100%;
@@ -543,14 +557,14 @@
     sans-serif;
 }
 /* Typ-Symbole (Ordner/Notiz) im Trilium-Stil vor dem Namen. */
-.wiki-tree-icon {
+.archive-tree-icon {
   flex: none;
   display: inline-flex;
   margin-right: 0.4em;
 }
 /* Symbolgröße relativ zur Schrift (Regel 1.1); das Markup trägt keine
    width/height-Attribute (1.4). */
-.wiki-tree-icon svg {
+.archive-tree-icon svg {
   width: 1.5em;
   height: 1.5em;
   fill: none;
@@ -559,14 +573,14 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.wiki-tree summary.active .wiki-tree-icon svg,
-.wiki-tree-doc.active .wiki-tree-icon svg {
+.archive-tree summary.active .archive-tree-icon svg,
+.archive-tree-doc.active .archive-tree-icon svg {
   stroke: var(--accent);
 }
 /* Vorschau statt Symbol: bei einer Zeichnung sagt der Dateiname wenig und das
    Bildchen alles. Es steht an der Stelle des Symbols und in dessen Größe, mit
    etwas mehr Breite — eine liegende Figur wäre sonst nicht zu erkennen. */
-.wiki-tree-thumb {
+.archive-tree-thumb {
   flex: none;
   width: 2.4em;
   height: 1.6em;
@@ -577,26 +591,26 @@
      die Zeile nicht springt und weiße Striche sichtbar bleiben. */
   background: var(--line);
 }
-.wiki-tree-thumb-leer {
+.archive-tree-thumb-leer {
   visibility: hidden;
 }
-.wiki-tree-doc:hover {
+.archive-tree-doc:hover {
   background: var(--tile);
 }
-.wiki-tree-doc.active,
-.wiki-tree summary.active,
-.wiki-tree-root.active {
+.archive-tree-doc.active,
+.archive-tree summary.active,
+.archive-tree-root.active {
   background: var(--tile);
   color: var(--accent);
 }
-.wiki-tree summary::-webkit-details-marker {
+.archive-tree summary::-webkit-details-marker {
   display: none;
 }
 /* Das Ordner-Symbol ist zugleich der Klapp-Schalter. */
-.wiki-tree summary .wiki-tree-icon {
+.archive-tree summary .archive-tree-icon {
   cursor: pointer;
 }
-.wiki-tree-name {
+.archive-tree-name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -605,18 +619,18 @@
 }
 /* Aktionen sind immer sichtbar (Regel 3.1) — Hover hebt hervor, es
    enthüllt nichts. */
-.wiki-tree summary .panel-btn {
+.archive-tree summary .panel-btn {
   color: var(--muted);
 }
-.wiki-tree summary:hover .panel-btn {
+.archive-tree summary:hover .panel-btn {
   color: var(--text);
 }
-.wiki-tree summary:hover,
-.wiki-tree-root:hover {
+.archive-tree summary:hover,
+.archive-tree-root:hover {
   background: var(--tile);
   border-radius: 4px;
 }
-.wiki-tree-root {
+.archive-tree-root {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -632,7 +646,7 @@
     system-ui,
     sans-serif;
 }
-.wiki-tree-input {
+.archive-tree-input {
   box-sizing: border-box;
   width: 100%;
   background: var(--surface);
@@ -647,25 +661,25 @@
   outline: none;
 }
 /* Zeilen-Aktionen: immer sichtbar (Regel 3.1), Hover hebt hervor. */
-.wiki-doc-actions {
+.archive-doc-actions {
   display: flex;
   gap: 0.15em;
   color: var(--muted);
 }
-.wiki-doc:hover .wiki-doc-actions {
+.archive-doc:hover .archive-doc-actions {
   color: var(--text);
 }
 /* Kopfzeile des Baums: Wurzel-Knopf + Ordner anlegen. */
-.wiki-tree-head {
+.archive-tree-head {
   display: flex;
   align-items: center;
   gap: 2px;
 }
-.wiki-tree-head .wiki-tree-root {
+.archive-tree-head .archive-tree-root {
   flex: 1;
   min-width: 0;
 }
-.wiki-add {
+.archive-add {
   border: none;
   background: none;
   color: var(--muted);
@@ -677,16 +691,16 @@
     sans-serif;
   cursor: pointer;
 }
-.wiki-add:hover {
+.archive-add:hover {
   background: var(--tile);
   color: var(--text);
 }
 /* Anlege-Dialog (Ordner/Dokument): modales Popup mit abgedunkeltem
    Hintergrund. */
-.wiki-modal[hidden] {
+.archive-modal[hidden] {
   display: none;
 }
-.wiki-modal {
+.archive-modal {
   position: fixed;
   inset: 0;
   z-index: 300;
@@ -695,7 +709,7 @@
   align-items: center;
   justify-content: center;
 }
-.wiki-form {
+.archive-form {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -708,25 +722,25 @@
     0 2px 8px rgba(0, 0, 0, 0.4);
   padding: 18px 20px;
 }
-.wiki-form-title {
+.archive-form-title {
   color: var(--text);
   font:
     600 16px/1.4 -apple-system,
     system-ui,
     sans-serif;
 }
-.wiki-form-row {
+.archive-form-row {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
 }
-.wiki-form .wiki-tree-input {
+.archive-form .archive-tree-input {
   width: 100%;
   padding: 8px 10px;
   font-size: 15px;
 }
-.wiki-form-submit,
-.wiki-form-cancel {
+.archive-form-submit,
+.archive-form-cancel {
   border: none;
   background: var(--line);
   color: var(--text);
@@ -738,20 +752,20 @@
     system-ui,
     sans-serif;
 }
-.wiki-form-submit:hover {
+.archive-form-submit:hover {
   background: var(--line-strong);
 }
-.wiki-form-cancel {
+.archive-form-cancel {
   background: none;
   color: var(--muted);
 }
-.wiki-form-cancel:hover {
+.archive-form-cancel:hover {
   background: var(--tile);
 }
 /* Notiz-Ansicht rechts: großer Titel wie in Trilium, Meta-Zeile, Inhalt.
    Kopf und Inhalt teilen sich eine Maximalbreite — sonst läuft die Zeile
    in breiten Fenstern ins Uferlose. */
-.wiki-note-head {
+.archive-note-head {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -763,18 +777,18 @@
 /* Aktions-Knöpfe im Notizkopf und Baum: kräftige Größe. Die SVG-Icons
    (Papierkorb, Import) tragen feste 14-px-Attribute — die CSS-Breite
    überstimmt sie, sonst bleiben sie winzig. */
-.wiki-note-titlerow .panel-btn,
-.wiki-tree .panel-btn {
+.archive-note-titlerow .panel-btn,
+.archive-tree .panel-btn {
   font-size: 1.5rem;
   padding: 0.25em 0.5em;
 }
-.wiki-note-titlerow .panel-btn svg,
-.wiki-tree .panel-btn svg {
+.archive-note-titlerow .panel-btn svg,
+.archive-tree .panel-btn svg {
   width: 0.92em;
   height: 0.92em;
 }
 /* Suchfeld (filtert die Liste) und Sortier-Widget in der Titelzeile. */
-.wiki-filter {
+.archive-filter {
   flex: none;
   width: 13em;
   background: var(--tile);
@@ -785,12 +799,12 @@
   font-size: 0.875rem;
   outline: none;
 }
-.wiki-filter:focus {
+.archive-filter:focus {
   border-color: var(--accent);
 }
 /* Senkrechter Strich: trennt die Suche/Sortier-Gruppe von den
    Aktions-Knöpfen. */
-.wiki-head-sep {
+.archive-head-sep {
   flex: none;
   width: 1px;
   height: 1.9em;
@@ -798,7 +812,7 @@
   background: var(--line-strong);
 }
 /* Sortier-Knopf: trägt die geltende erste Stufe im Klartext (Regel 4.2). */
-.wiki-sort {
+.archive-sort {
   flex: none;
   background: var(--tile);
   border: 1px solid var(--line-strong);
@@ -810,16 +824,16 @@
   outline: none;
   white-space: nowrap;
 }
-.wiki-sort:hover {
+.archive-sort:hover {
   border-color: var(--accent);
 }
 /* Sortier-Menü: Zeilenreihenfolge = Rangfolge. Feste Breite — beim
    Umsortieren darf das offene Menü nicht springen (Regel 2.3). */
-.wiki-sort-menu {
+.archive-sort-menu {
   width: 16em;
   gap: 1px;
 }
-.wiki-sort-row {
+.archive-sort-row {
   display: flex;
   align-items: center;
   gap: 0.7em;
@@ -827,10 +841,10 @@
   border-radius: 5px;
 }
 /* Die oberste Zeile ist die geltende erste Stufe. */
-.wiki-sort-row.first {
+.archive-sort-row.first {
   background: var(--surface);
 }
-.wiki-sort-name {
+.archive-sort-name {
   flex: 1;
   min-width: 0;
   color: var(--text);
@@ -839,16 +853,16 @@
     system-ui,
     sans-serif;
 }
-.wiki-sort-row.first .wiki-sort-name {
+.archive-sort-row.first .archive-sort-name {
   color: var(--accent);
 }
-.wiki-sort-dirs {
+.archive-sort-dirs {
   flex: none;
   display: flex;
   gap: 0.15em;
 }
 /* Trefferfläche mindestens 24×24 px (WCAG 2.2, SC 2.5.8). */
-.wiki-sort-dir {
+.archive-sort-dir {
   min-width: 24px;
   min-height: 24px;
   border: 1px solid transparent;
@@ -860,31 +874,31 @@
   font-size: 0.95rem;
   line-height: 1.3;
 }
-.wiki-sort-dir:hover {
+.archive-sort-dir:hover {
   color: var(--text);
   border-color: var(--line-strong);
 }
-.wiki-sort-dir.active {
+.archive-sort-dir.active {
   background: var(--line);
   color: var(--accent);
 }
-.wiki-note-titlerow .wiki-form-submit,
-.wiki-note-titlerow .wiki-form-cancel {
+.archive-note-titlerow .archive-form-submit,
+.archive-note-titlerow .archive-form-cancel {
   font-size: 0.95rem;
   padding: 0.55em 1.2em;
 }
 /* Maximalbreite für Textflächen (Regel 2.5). */
-.wiki-note-head,
-.wiki-main .wiki-note-body:not(.wiki-edit-preview) {
+.archive-note-head,
+.archive-main .archive-note-body:not(.archive-edit-preview) {
   max-width: 60rem;
   margin-inline: auto;
 }
-.wiki-note-titlerow {
+.archive-note-titlerow {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.wiki-note-back {
+.archive-note-back {
   flex: none;
   border: none;
   background: none;
@@ -895,15 +909,15 @@
   line-height: 1.2;
   cursor: pointer;
 }
-.wiki-note-back:hover:not(:disabled) {
+.archive-note-back:hover:not(:disabled) {
   background: var(--tile);
   color: var(--text);
 }
-.wiki-note-back:disabled {
+.archive-note-back:disabled {
   color: var(--line);
   cursor: default;
 }
-.wiki-note-title {
+.archive-note-title {
   flex: 1;
   min-width: 0;
   color: var(--text);
@@ -912,16 +926,16 @@
     system-ui,
     sans-serif;
 }
-.wiki-note-title.editable {
+.archive-note-title.editable {
   cursor: text;
   border-radius: 6px;
   padding: 2px 6px;
   margin-left: -6px;
 }
-.wiki-note-title.editable:hover {
+.archive-note-title.editable:hover {
   background: var(--tile);
 }
-.wiki-note-title-input {
+.archive-note-title-input {
   flex: 1;
   min-width: 0;
   box-sizing: border-box;
@@ -939,21 +953,21 @@
 }
 /* Kopf-Aktionen: immer sichtbar (Regel 3.1). Eine zweite Regel für
    dieselbe Klasse gab es früher weiter unten — zusammengeführt (6.1). */
-.wiki-note-actions {
+.archive-note-actions {
   display: flex;
   align-items: center;
   gap: 0.15em;
 }
-.wiki-note-head:hover .wiki-note-title.editable {
+.archive-note-head:hover .archive-note-title.editable {
   cursor: text;
   border-radius: 6px;
   padding: 2px 6px;
   margin-left: -6px;
 }
-.wiki-note-title.editable:hover {
+.archive-note-title.editable:hover {
   background: var(--tile);
 }
-.wiki-note-title-input {
+.archive-note-title-input {
   flex: 1;
   min-width: 0;
   box-sizing: border-box;
@@ -1166,8 +1180,8 @@
 /* Rand: In der fertigen Notiz verschwindet er, im Editor nicht — dort bleibt
    ein blasses, gestricheltes Gitter stehen. Ohne Linien schreibt man ins
    Blaue und sieht weder Zellgrenzen noch die Größe der Tabelle. */
-.wiki-note-body table.randlos td,
-.wiki-note-body table.randlos th,
+.archive-note-body table.randlos td,
+.archive-note-body table.randlos th,
 #panel-content.md table.randlos td,
 #panel-content.md table.randlos th {
   border: none;
@@ -1183,23 +1197,23 @@
    braucht (`table-layout: auto` statt der festen Spalten), und höchstens die
    halbe Zeile — sonst bleibt für den Text daneben nichts übrig. */
 .html-surface .ProseMirror table.fluss-links,
-.wiki-note-body table.fluss-links,
+.archive-note-body table.fluss-links,
 #panel-content.md table.fluss-links,
 .html-surface .ProseMirror table.fluss-rechts,
-.wiki-note-body table.fluss-rechts,
+.archive-note-body table.fluss-rechts,
 #panel-content.md table.fluss-rechts {
   width: auto;
   max-width: 50%;
   table-layout: auto;
 }
 .html-surface .ProseMirror table.fluss-links,
-.wiki-note-body table.fluss-links,
+.archive-note-body table.fluss-links,
 #panel-content.md table.fluss-links {
   float: left;
   margin: 0 1.2em 0.6em 0;
 }
 .html-surface .ProseMirror table.fluss-rechts,
-.wiki-note-body table.fluss-rechts,
+.archive-note-body table.fluss-rechts,
 #panel-content.md table.fluss-rechts {
   float: right;
   margin: 0 0 0.6em 1.2em;
@@ -1219,20 +1233,20 @@
 /* Markdown-Editor der Notiz (Bearbeiten im Archiv): Rohtext links,
    Live-Vorschau rechts. Gedeckelt und zentriert — auf breiten Fenstern
    werden die Spalten sonst unlesbar breit. */
-.wiki-note-edit {
+.archive-note-edit {
   max-width: 94rem;
   margin-inline: auto;
 }
-.wiki-edit-split {
+.archive-edit-split {
   display: flex;
   gap: 14px;
   align-items: stretch;
 }
-.wiki-edit-split > * {
+.archive-edit-split > * {
   flex: 1 1 50%;
   min-width: 0;
 }
-.wiki-edit-preview {
+.archive-edit-preview {
   overflow: auto;
   height: 70vh;
   border-left: 1px solid var(--line-strong);
@@ -1240,7 +1254,7 @@
 }
 /* Rohtext-Fläche: Rahmen und Hintergrund liegen hier, alles Innere bringt
    CodeMirror mit (Zeilenumbruch, Cursor, Farben). */
-.wiki-note-editor {
+.archive-note-editor {
   box-sizing: border-box;
   width: 100%;
   height: 70vh;
@@ -1249,10 +1263,10 @@
   border: 1px solid var(--line-strong);
   border-radius: 8px;
 }
-.wiki-note-editor:focus-within {
+.archive-note-editor:focus-within {
   border-color: var(--accent);
 }
-.wiki-note-error {
+.archive-note-error {
   color: #f38ba8;
   margin-bottom: 8px;
   font:
@@ -1261,7 +1275,7 @@
     sans-serif;
 }
 /* Kontextmenü im Baum (rechte Maustaste). */
-.wiki-menu {
+.archive-menu {
   position: fixed;
   z-index: 200;
   min-width: 180px;
@@ -1275,7 +1289,7 @@
   display: flex;
   flex-direction: column;
 }
-.wiki-menu-item {
+.archive-menu-item {
   border: none;
   background: none;
   color: var(--text);
@@ -1288,14 +1302,14 @@
     system-ui,
     sans-serif;
 }
-.wiki-menu-item:hover {
+.archive-menu-item:hover {
   background: var(--surface);
 }
 /* Info-Popup am ⓘ-Knopf der Titelzeile. */
-.wiki-note-titlerow {
+.archive-note-titlerow {
   position: relative;
 }
-.wiki-note-info-pop {
+.archive-note-info-pop {
   position: absolute;
   top: 100%;
   right: 0;
@@ -1310,7 +1324,7 @@
   padding: 12px 16px;
   margin-top: 6px;
 }
-.wiki-info-caption {
+.archive-info-caption {
   color: var(--text);
   margin-bottom: 6px;
   font:
@@ -1318,7 +1332,7 @@
     system-ui,
     sans-serif;
 }
-.wiki-info-line {
+.archive-info-line {
   color: var(--muted);
   white-space: nowrap;
   font:
@@ -1326,7 +1340,7 @@
     system-ui,
     sans-serif;
 }
-.wiki-note-body {
+.archive-note-body {
   color: var(--text);
   font:
     400 17px/1.6 -apple-system,
@@ -1339,12 +1353,12 @@
 /* Diagramm-Ansicht: eigene Bühne unter der Knopfzeile, die den Rest des
    Fensters füllt. Das Diagramm wird beim Öffnen hineingezoomt (zeigeDrawio),
    gescrollt wird erst, wenn die Zoom-Knöpfe vergrößern. */
-.wiki-note-drawio {
+.archive-note-drawio {
   flex: 1;
   min-height: 0;
   display: flex;
 }
-.wiki-note-drawio > div {
+.archive-note-drawio > div {
   flex: 1;
   min-width: 0;
   background: #fff;
@@ -1357,20 +1371,20 @@
 }
 /* Rohtext-Ansicht sonstiger Dateien (JSON, Logs …). */
 /* Bild-Ansicht im Archiv: eingepaßt in die Fläche, Klick öffnet das Fenster. */
-.wiki-note-bild {
+.archive-note-bild {
   display: grid;
   place-items: center;
   padding: 12px;
   min-height: 0;
   flex: 1;
 }
-.wiki-note-bild img {
+.archive-note-bild img {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   cursor: zoom-in;
 }
-.wiki-note-plain {
+.archive-note-plain {
   margin: 0;
   font-family: "JetBrains Mono", Menlo, monospace;
   font-size: 13px;
@@ -1378,62 +1392,62 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
-.wiki-note-body h1,
-.wiki-note-body h2,
-.wiki-note-body h3 {
+.archive-note-body h1,
+.archive-note-body h2,
+.archive-note-body h3 {
   line-height: 1.25;
   margin: 1em 0 0.4em;
 }
-.wiki-note-body h1 {
+.archive-note-body h1 {
   font-size: 1.35em;
 }
-.wiki-note-body h2 {
+.archive-note-body h2 {
   font-size: 1.15em;
 }
-.wiki-note-body h3 {
+.archive-note-body h3 {
   font-size: 1.05em;
 }
-.wiki-note-body :first-child {
+.archive-note-body :first-child {
   margin-top: 0;
 }
-.wiki-note-body p,
-.wiki-note-body ul,
-.wiki-note-body ol,
-.wiki-note-body pre,
-.wiki-note-body blockquote {
+.archive-note-body p,
+.archive-note-body ul,
+.archive-note-body ol,
+.archive-note-body pre,
+.archive-note-body blockquote {
   margin: 0 0 0.7em;
 }
-.wiki-note-body code {
+.archive-note-body code {
   font-family: "JetBrains Mono", Menlo, monospace;
   font-size: 0.85em;
   background: var(--line);
   border-radius: 4px;
   padding: 1px 5px;
 }
-.wiki-note-body pre {
+.archive-note-body pre {
   background: var(--tile);
   border-radius: 8px;
   padding: 12px 14px;
   overflow: auto;
 }
-.wiki-note-body pre code {
+.archive-note-body pre code {
   background: none;
   padding: 0;
 }
-.wiki-note-body blockquote {
+.archive-note-body blockquote {
   border-left: 3px solid var(--line);
   padding-left: 12px;
   color: var(--muted);
 }
-.wiki-note-body a {
+.archive-note-body a {
   color: var(--accent);
 }
-.wiki-note-body table {
+.archive-note-body table {
   border-collapse: collapse;
   margin: 0 0 0.7em;
 }
-.wiki-note-body td,
-.wiki-note-body th {
+.archive-note-body td,
+.archive-note-body th {
   border: 1px solid var(--line-strong);
   padding: 6px 8px;
   vertical-align: top;
@@ -1442,20 +1456,20 @@
    Browsers zentriert sie, und der Kopf steht dann versetzt über den Werten.
    Eine Ausrichtung aus dem Markdown (`:---:`) steht als align-Attribut da
    und behält Vorrang. */
-.wiki-note-body th:not([align]) {
+.archive-note-body th:not([align]) {
   text-align: left;
 }
-.wiki-note-body th {
+.archive-note-body th {
   background: var(--surface);
 }
-.wiki-note-children {
+.archive-note-children {
   margin-top: 26px;
   background: var(--tile);
   border: 1px solid var(--line-strong);
   border-radius: 10px;
   padding: 12px 14px;
 }
-.wiki-children-caption {
+.archive-children-caption {
   color: var(--faint);
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -1466,11 +1480,11 @@
     sans-serif;
 }
 /* Default-Text einer Ordner-Notiz ohne Inhaltsdatei. */
-.wiki-note-body.default {
+.archive-note-body.default {
   color: var(--muted);
 }
 /* Einstiegs-Knopf im Leerzustand. */
-.wiki-chip {
+.archive-chip {
   border: 1px solid var(--line-strong);
   background: transparent;
   color: var(--muted);
@@ -1481,11 +1495,11 @@
     system-ui,
     sans-serif;
 }
-.wiki-chip:hover {
+.archive-chip:hover {
   background: var(--line);
   color: var(--text);
 }
-.wiki-doc {
+.archive-doc {
   padding: 10px 12px;
   margin: 0 0 8px;
   background: var(--surface);
@@ -1493,26 +1507,26 @@
   border-radius: 8px;
   cursor: pointer;
 }
-.wiki-doc:last-child {
+.archive-doc:last-child {
   margin-bottom: 0;
 }
-.wiki-doc:hover {
+.archive-doc:hover {
   border-color: var(--accent);
 }
-.wiki-doc-line {
+.archive-doc-line {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 /* Textspalte der Kachel: Titel über Beschreibung, einzeilig mit Ellipse. */
-.wiki-doc-text {
+.archive-doc-text {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
-.wiki-doc-title {
+.archive-doc-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1524,27 +1538,27 @@
     sans-serif;
 }
 /* Typ-Symbol groß über beide Zeilen der Kachel. */
-.wiki-doc .wiki-tree-icon svg {
+.archive-doc .archive-tree-icon svg {
   width: 2.4em;
   height: 2.4em;
 }
 /* Kachel plus Aktions-Icons dahinter — außerhalb der Kachel, immer
    sichtbar. */
-.wiki-doc-row {
+.archive-doc-row {
   display: flex;
   align-items: center;
   gap: 0.3em;
   margin: 0 0 0.5em;
 }
-.wiki-doc-row:last-child {
+.archive-doc-row:last-child {
   margin-bottom: 0;
 }
-.wiki-doc-row .wiki-doc {
+.archive-doc-row .archive-doc {
   flex: 1;
   min-width: 0;
   margin: 0;
 }
-.wiki-row-actions {
+.archive-row-actions {
   /* Feste Spaltenbreite (Platz für zwei Knöpfe): die Kachel davor ist
      dadurch immer gleich breit, egal wie viele Aktionen eine Zeile
      trägt (Regel 2.2). */
@@ -1553,11 +1567,11 @@
   display: flex;
   gap: 0.15em;
 }
-.wiki-row-actions .panel-btn svg {
+.archive-row-actions .panel-btn svg {
   width: 1.25em;
   height: 1.25em;
 }
-.wiki-doc-date {
+.archive-doc-date {
   color: var(--muted);
   font-family: "JetBrains Mono", Menlo, monospace;
   font-size: 0.8rem;
@@ -1565,7 +1579,7 @@
   text-align: right;
   line-height: 1.45;
 }
-.wiki-doc-desc {
+.archive-doc-desc {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1576,7 +1590,7 @@
     system-ui,
     sans-serif;
 }
-.wiki-empty {
+.archive-empty {
   margin-top: 18px;
   color: var(--muted);
   font:
@@ -1584,14 +1598,14 @@
     system-ui,
     sans-serif;
 }
-.wiki-empty strong {
+.archive-empty strong {
   display: block;
   margin-bottom: 6px;
   color: var(--text);
   font-weight: 600;
 }
 /* Backlink-Zähler in der Dokumentzeile. */
-.wiki-doc-back {
+.archive-doc-back {
   color: var(--faint);
   font:
     500 10px/1 -apple-system,
@@ -1601,7 +1615,7 @@
 }
 
 /* Archiv-Formular: klappt unter dem Archiv-Button auf. */
-/* Archiv-Dialog: Optik aus .wiki-modal/.wiki-form, plus Ordner-Baum zum
+/* Archiv-Dialog: Optik aus .archive-modal/.archive-form, plus Ordner-Baum zum
    Anklicken. */
 .archive-form-box {
   min-width: 540px;
@@ -1619,17 +1633,17 @@
 }
 /* Eingabefelder des Dialogs sichtbar abheben — der dünne Rahmen auf
    dunklem Grund war als Feld nicht zu erkennen. */
-.archive-form-box .wiki-tree-input {
+.archive-form-box .archive-tree-input {
   background: var(--surface);
   border: 1px solid var(--line-strong);
   border-radius: 6px;
   padding: 9px 12px;
   font-size: 15px;
 }
-.archive-form-box .wiki-tree-input:focus {
+.archive-form-box .archive-tree-input:focus {
   border-color: var(--accent);
 }
-.archive-form-box .wiki-tree-input::placeholder {
+.archive-form-box .archive-tree-input::placeholder {
   color: var(--faint);
 }
 /* Durchlaufbarer Ordnerbaum: eigene Fläche, scrollt bei vielen Ordnern. */
@@ -1716,22 +1730,22 @@
   border-color: var(--accent);
   color: var(--accent);
 }
-.archive-browse-row .wiki-tree-name {
+.archive-browse-row .archive-tree-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.archive-browse-row .wiki-tree-icon svg {
+.archive-browse-row .archive-tree-icon svg {
   fill: none;
   stroke: var(--muted);
   stroke-width: 1.3;
 }
-.archive-browse-row.active .wiki-tree-icon svg {
+.archive-browse-row.active .archive-tree-icon svg {
   stroke: var(--accent);
 }
 /* Knopfreihe vom Formular abgesetzt. */
-.archive-form-box .wiki-form-row {
+.archive-form-box .archive-form-row {
   border-top: 1px solid var(--line-strong);
   padding-top: 12px;
   margin-top: 2px;
@@ -1759,12 +1773,12 @@
 
 /* Buch statt Notiz: die Fläche wird gefüllt und im Buch geblättert, statt
    die Seite zu scrollen. */
-.wiki-main.epub-mode {
+.archive-main.epub-mode {
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
-.wiki-note-epub {
+.archive-note-epub {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -1916,30 +1930,30 @@
 /* Auskunft und Nachtmodus stehen in der Titelzeile bei den übrigen Aktionen
    des Buchs, in deren Größe — sie sind so gut zu treffen wie der Papierkorb
    daneben. */
-.wiki-note-titlerow .epub-info,
-.wiki-note-titlerow .epub-nacht,
-.wiki-note-titlerow .epub-klapp,
-.wiki-note-titlerow .epub-seitig,
-.wiki-note-titlerow .epub-marker,
-.wiki-note-titlerow .epub-kleiner,
-.wiki-note-titlerow .epub-groesser {
+.archive-note-titlerow .epub-info,
+.archive-note-titlerow .epub-nacht,
+.archive-note-titlerow .epub-klapp,
+.archive-note-titlerow .epub-seitig,
+.archive-note-titlerow .epub-marker,
+.archive-note-titlerow .epub-kleiner,
+.archive-note-titlerow .epub-groesser {
   color: var(--text);
   line-height: 1;
 }
-.wiki-note-titlerow .epub-info:hover,
-.wiki-note-titlerow .epub-nacht:hover,
-.wiki-note-titlerow .epub-klapp:hover,
-.wiki-note-titlerow .epub-seitig:hover,
-.wiki-note-titlerow .epub-marker:hover,
-.wiki-note-titlerow .epub-kleiner:hover,
-.wiki-note-titlerow .epub-groesser:hover {
+.archive-note-titlerow .epub-info:hover,
+.archive-note-titlerow .epub-nacht:hover,
+.archive-note-titlerow .epub-klapp:hover,
+.archive-note-titlerow .epub-seitig:hover,
+.archive-note-titlerow .epub-marker:hover,
+.archive-note-titlerow .epub-kleiner:hover,
+.archive-note-titlerow .epub-groesser:hover {
   background: var(--line);
   border-radius: 6px;
 }
 /* Seitenmodus und Umbruchmarken sind Zustände, keine Befehle — eingeschaltet
    bleiben sie sichtbar. */
-.wiki-note-titlerow .epub-seitig.an,
-.wiki-note-titlerow .epub-marker.an {
+.archive-note-titlerow .epub-seitig.an,
+.archive-note-titlerow .epub-marker.an {
   background: var(--line);
   border-radius: 6px;
 }
@@ -1953,13 +1967,13 @@
 }
 /* Die beiden Schriftgrad-Knöpfe stehen als Paar zusammen und schmaler als
    die Zeichen daneben — sie tragen zwei Glyphen statt einer. */
-.wiki-note-titlerow .epub-kleiner,
-.wiki-note-titlerow .epub-groesser {
+.archive-note-titlerow .epub-kleiner,
+.archive-note-titlerow .epub-groesser {
   font-size: 1.05rem;
   padding: 0.35em 0.3em;
 }
 /* Ist das Verzeichnis zugeklappt, tritt sein Schalter zurück. */
-.wiki-note-titlerow .epub-klapp.zu {
+.archive-note-titlerow .epub-klapp.zu {
   color: var(--faint);
 }
 /* Angaben zum Buch: aufgeklappt zwischen Fußzeile und Seite, damit der Text
@@ -2146,7 +2160,7 @@
 
 /* Editor-Werkzeugleiste (Diagramm einfügen): eigene, abgesetzte Fläche
    über dem Editor. */
-.wiki-edit-toolbar {
+.archive-edit-toolbar {
   position: sticky;
   top: 0;
   z-index: 3;
@@ -2160,7 +2174,7 @@
 }
 /* Werkzeuge des Rohtext-Editors (Diagramm, Tabelle) — eigene Klasse, damit
    sie nicht mit Abbrechen/Speichern im Kopf verwechselt werden. */
-.wiki-edit-tool {
+.archive-edit-tool {
   border: 1px solid var(--line-strong);
   background: var(--tile);
   color: var(--text);
@@ -2172,6 +2186,6 @@
     system-ui,
     sans-serif;
 }
-.wiki-edit-tool:hover {
+.archive-edit-tool:hover {
   border-color: var(--accent);
 }

@@ -331,7 +331,7 @@ export interface MdEditorOpts {
 
 export function initMdEditor(opts: MdEditorOpts): MdEditor {
   const el = document.createElement("div");
-  el.className = "wiki-note-editor";
+  el.className = "archive-note-editor";
 
   const tasten = keymap.of([
     { key: "Mod-s", run: () => (opts.onSave(), true) },

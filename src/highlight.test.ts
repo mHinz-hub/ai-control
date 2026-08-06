@@ -12,7 +12,7 @@ const box = (html: string) => {
 it("markiert jedes Vorkommen und liefert die erste Marke", () => {
   const el = box("<p>Kessel und <b>kesselhaus</b></p><p>nichts</p>");
   const erste = markiere(el, ["kessel"]);
-  const marken = el.querySelectorAll("mark.wiki-hit");
+  const marken = el.querySelectorAll("mark.archive-hit");
   expect(marken).toHaveLength(2);
   expect(marken[0].textContent).toBe("Kessel");
   expect(marken[1].textContent).toBe("kessel");

@@ -6,7 +6,7 @@
 /// `<buffer>-update`-Event.
 
 import { commandsTab } from "./commands";
-import { searchTab, wikiTab } from "./archive";
+import { searchTab, archiveTab } from "./archive";
 import { todoTab } from "./todo";
 
 export interface ModuleView {
@@ -21,10 +21,8 @@ export interface ModuleCtx {
   /// Läuft die Ansicht im eigenen Panel-Fenster (statt angedockt)?
   standalone: boolean;
   toast(msg: string): void;
-  /// Dokument in den Entwurfs-Tab laden (Treffer-Klick).
-  openDoc(path: string): void;
-  /// Wiki-Ziel öffnen (Wikilink, Chip, `tag:`-Namensraum).
-  openWiki(name: string): void;
+  /// Archiv-Ziel öffnen (Wikilink, Chip, `tag:`-Namensraum).
+  openArchive(name: string): void;
 }
 
 export interface PanelTab {
@@ -47,11 +45,11 @@ export interface PanelTab {
   /// Baut die Ansicht des Tabs. Ohne init verdrahtet panel-wiring die
   /// Ansicht selbst (Entwurfs-Tab — Kern mit eigenem Markup).
   init?(container: HTMLElement, ctx: ModuleCtx): ModuleView;
-  /// Nach Tab-Klick (z. B. Wiki: leere Ansicht lädt die Übersicht).
+  /// Nach Tab-Klick (z. B. Archiv: leere Ansicht lädt die Übersicht).
   onActivate?(view: ModuleView, ctx: ModuleCtx): void;
 }
 
-// Der Entwurf ("draft") hat bewusst KEINEN Tab: Die Ansicht erscheint, wenn
-// ein Entwurf hereinkommt (panel-update → mode "draft") oder eine Notiz zum
-// Bearbeiten geladen wird — als flüchtige Fläche, nicht als Reiter.
-export const PANEL_TABS: PanelTab[] = [todoTab, commandsTab, wikiTab, searchTab];
+// Der Entwurf ("draft") steht nicht in dieser Liste: Sein Reiter gehört fest
+// zur Sitzungsfläche und entsteht in panel-wiring — mit eigenem Markup statt
+// eines Modul-Containers, und nur solange es einen Entwurf gibt.
+export const PANEL_TABS: PanelTab[] = [todoTab, commandsTab, archiveTab, searchTab];

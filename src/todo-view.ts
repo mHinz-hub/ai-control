@@ -10,6 +10,7 @@
 
 import { storedLocale, t } from "./messages";
 import {
+  actionBar,
   copyAction,
   deleteAction,
   editAction,
@@ -155,9 +156,11 @@ export function initTodoView(
               : []),
           ],
           actions: [
-            copyAction(t("todos.copyOne"), () => visible),
-            editAction(t("todos.editOne"), () => open(todo)),
-            deleteAction(t("todos.removeOne"), () => onDelete(todo.id ?? "")),
+            actionBar(
+              copyAction(t("todos.copyOne"), () => visible),
+              editAction(t("todos.editOne"), () => open(todo)),
+              deleteAction(t("todos.removeOne"), () => onDelete(todo.id ?? "")),
+            ),
           ],
         }),
       );

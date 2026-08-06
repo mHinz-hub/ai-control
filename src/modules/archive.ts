@@ -2,11 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { t } from "../messages";
 import { initSearchView, type SearchView } from "../search-view";
-import { initWikiView } from "../wiki-view";
+import { initArchiveView } from "../archive-view";
 import type { PanelTab } from "./index";
 
 /// Suchtreffer-Sprung ins Archiv: der Treffer merkt den relpath vor, lädt die
-/// Übersicht neu (wiki-update wechselt den Tab), und die Archiv-Ansicht holt
+/// Übersicht neu (archive-update wechselt den Tab), und die Archiv-Ansicht holt
 /// die Vormerkung beim nächsten set() ab.
 let pendingSelect: string | null = null;
 /// Die Wörter des Treffers — die Archiv-Ansicht markiert sie im geöffneten
@@ -17,15 +17,15 @@ let pendingPart = "";
 /// Welche Fundstelle gemeint war — die Anzeige springt zu ihr.
 let pendingSpot = 0;
 
-export const wikiTab: PanelTab = {
-  mode: "wiki",
+export const archiveTab: PanelTab = {
+  mode: "archive",
   module: "archive",
-  buffer: "wiki",
+  buffer: "archive",
   popupOnly: true,
-  labelKey: "panel.tabWiki",
-  titleKey: "panel.tabWikiTitle",
+  labelKey: "panel.tabArchive",
+  titleKey: "panel.tabArchiveTitle",
   // Dokument-/Ordner-Operationen laufen als Commands; der neue Stand kommt
-  // über den Wiki-Puffer (wiki-update) zurück, Fehler als Toast. Der
+  // über den Archiv-Puffer (archive-update) zurück, Fehler als Toast. Der
   // Notiz-Inhalt kommt pro Auswahl über archive_read; Bearbeiten lädt wie
   // bisher in den Dokument-Tab.
   init: (container, ctx) => {
@@ -43,7 +43,7 @@ export const wikiTab: PanelTab = {
         ctx.toast(String(e));
         throw e;
       });
-    return initWikiView(container, {
+    return initArchiveView(container, {
       autoStart: ctx.standalone,
       readDoc: (id) => invoke("archive_read", { project: ctx.project, id }),
       readFile: (id) => invoke("archive_read_file", { project: ctx.project, id }),
@@ -55,7 +55,7 @@ export const wikiTab: PanelTab = {
       readImage: (id) => invoke("archive_image", { project: ctx.project, id }),
       openImage: (id) => run("open_image_window", { id }),
       setTitle: (id, title) => run("archive_set_title", { id, title }),
-      openWiki: ctx.openWiki,
+      openArchive: ctx.openArchive,
       takePending: () => {
         const p = pendingSelect;
         pendingSelect = null;
@@ -86,13 +86,13 @@ export const wikiTab: PanelTab = {
         // statt den Nutzer nach dem Anlegen ins Leere laufen zu lassen.
         createDrawio: (near, name) =>
           create("archive_create_drawio", { near, name }).then((rel) => {
-            if (!drawio) ctx.toast(t("wiki.drawioMissing"));
+            if (!drawio) ctx.toast(t("archive.drawioMissing"));
             return rel;
           }),
         reveal: (path) => void invoke("reveal_path_cmd", { path }),
         removeFolder: (path) => run("archive_delete_folder", { path }),
         // Datei-Dialog, dann Kopie ins Archiv; der Watcher meldet den neuen
-        // Stand über wiki-update.
+        // Stand über archive-update.
         importFiles: (parent) =>
           void open({ multiple: true }).then((sel) => {
             const paths = typeof sel === "string" ? [sel] : sel;
@@ -107,10 +107,10 @@ export const wikiTab: PanelTab = {
     });
   },
   // Beim Aktivieren die Übersicht frisch laden: das Anlegen eines Dokuments
-  // öffnet den Dokument-Tab, ohne den Wiki-Puffer anzufassen — und auch
+  // öffnet den Dokument-Tab, ohne den Archiv-Puffer anzufassen — und auch
   // direkt archivierte oder von Hand abgelegte Dateien erscheinen so.
   // Die Fenstergröße setzt allein open_panel_window beim Öffnen des Popups.
-  onActivate: (_view, ctx) => ctx.openWiki("tag:"),
+  onActivate: (_view, ctx) => ctx.openArchive("tag:"),
 };
 
 export const searchTab: PanelTab = {
@@ -121,7 +121,7 @@ export const searchTab: PanelTab = {
   labelKey: "panel.tabSearch",
   titleKey: "panel.tabSearchTitle",
   // Treffer-Klick öffnet die Notiz im Archiv-Tab: relpath vormerken, die
-  // Übersicht frisch laden — das wiki-update wechselt den Tab und die
+  // Übersicht frisch laden — das archive-update wechselt den Tab und die
   // Ansicht wählt die vorgemerkte Notiz aus.
   init: (container, ctx) =>
     initSearchView(
@@ -131,7 +131,7 @@ export const searchTab: PanelTab = {
         pendingMarks = marken;
         pendingPart = teil;
         pendingSpot = nr ?? 0;
-        ctx.openWiki("tag:");
+        ctx.openArchive("tag:");
       },
       (raw) => {
         // `#tag`-Tokens filtern aufs Schlagwort, der Rest ist die Volltext-Query.

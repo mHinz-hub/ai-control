@@ -220,12 +220,11 @@ term.focus();
 
 // --- Andockbares Entwurfs-Panel -------------------------------------------
 // Der Skill schreibt Entwürfe in eine Datei; terminal.rs meldet neuen Inhalt
-// per `panel-update`. Das Panel blendet sich dann ein — außer es ist gerade in
-// ein eigenes Fenster abgelöst (`panel-detached`).
+// per `panel-update`. Das Panel blendet sich dann ein. Ein abgelöstes
+// Sitzungs-Fenster steht daneben, ohne das Dock zu verdrängen — die einzige
+// Verständigung zwischen beiden ist das Andocken (`panel-attached`).
 const panel = document.getElementById("panel")!;
 const splitter = document.getElementById("splitter")!;
-
-let detached = false;
 
 function showPanel() {
   panel.hidden = false;
@@ -239,19 +238,16 @@ function hidePanel() {
 }
 
 // Gemeinsame Verdrahtung (Views, Modi, Update-Events); jedes eingehende
-// Update blendet das angedockte Panel ein, solange es nicht abgelöst ist.
-const { view, views, mode } = await wirePanel(project, () => {
-  if (!detached) showPanel();
-});
+// Update blendet das angedockte Panel ein.
+const { view, views, mode } = await wirePanel(project, showPanel);
+// Das Dock ist die Sitzungsfläche — den Entwurf gibt es hier immer.
+const entwurf = view!;
 // Panel startet zugeklappt — außer das ToDo-Modul ist gewählt und die Liste
-// nicht leer: dann öffnet das Panel beim Start mit der ToDo-Ansicht.
+// nicht leer: dann öffnet das Panel beim Start mit der ToDo-Ansicht. Gewählt
+// ist der Standard-Reiter in jedem Fall, auch bei zugeklapptem Panel.
 const todos = views.get("todo");
-if (todos && !todos.empty()) {
-  showPanel();
-  mode.to("todo");
-} else {
-  mode.clear();
-}
+mode.standard();
+if (todos && !todos.empty()) showPanel();
 
 // Tab-Klick im Header öffnet das (angedockte) Panel, falls es zu ist.
 const headerTabs = document.getElementById("panel-tabs")!;
@@ -262,7 +258,7 @@ headerTabs.addEventListener(
   "click",
   (e) => {
     const btn = (e.target as HTMLElement).closest<HTMLElement>(
-      'button[data-mode="wiki"], button[data-mode="search"]',
+      'button[data-mode="archive"], button[data-mode="search"]',
     );
     if (!btn) return;
     e.stopPropagation();
@@ -271,31 +267,13 @@ headerTabs.addEventListener(
   },
   { capture: true },
 );
-headerTabs.addEventListener("click", () => {
-  if (!detached) showPanel();
-});
+headerTabs.addEventListener("click", showPanel);
 
-// Solange das Panel abgelöst ist, hat das eigene Fenster die Tabs — die im
-// Header verschwinden.
-await listen("panel-detached", () => {
-  detached = true;
-  headerTabs.hidden = true;
-  hidePanel();
-  mode.clear();
-});
 // Andocken aus dem Sitzungs-Fenster: das Panel kommt mit dem dort zuletzt
 // offenen Tab zurück ins Dock.
 await listen<string>("panel-attached", (e) => {
-  detached = false;
-  headerTabs.hidden = false;
   showPanel();
   mode.to(e.payload);
-});
-// Abgelöstes Fenster geschlossen (per ✕ oder OS): angedocktes Panel bleibt
-// ausgeblendet, aber der nächste Entwurf darf es wieder einblenden.
-await listen("panel-window-closed", () => {
-  detached = false;
-  headerTabs.hidden = false;
 });
 
 // Ablösen: die Sitzungsfläche — Entwurf, Befehle, Aufgaben — geht in ein
@@ -305,19 +283,17 @@ document.getElementById("panel-detach")!.addEventListener("click", () => {
   // Zweimal dieselbe Fläche wäre eine zuviel: das Dock klappt zu. Ein Klick
   // auf einen Tab holt es zurück, das Fenster bleibt davon unberührt.
   hidePanel();
-  mode.clear();
 });
 // Schließen: steht der Entwurf vorn, ist er damit verworfen — der Puffer wird
-// geleert, das Panel bleibt offen und schaltet auf ToDo. Den Wechsel macht
-// das `panel-update` des leeren Puffers, deshalb hier kein clear(). Aus ToDo
-// oder Befehlen heraus klappt das Panel zu.
+// geleert, das Panel bleibt offen und schaltet auf den Standard-Reiter. Den
+// Wechsel macht das `panel-update` des leeren Puffers. Aus ToDo oder Befehlen
+// heraus klappt das Panel zu; welcher Reiter gewählt ist, bleibt wie es war.
 document.getElementById("panel-hide")!.addEventListener("click", () => {
   if (mode.current() === "draft") {
     void invoke("panel_clear", { project });
     return;
   }
   hidePanel();
-  mode.clear();
 });
 
 // Archivieren: Button klappt das Formular (Ordner/Beschreibung/Schlagwörter)
@@ -340,7 +316,7 @@ const archiveForm = initArchiveForm(
         if (!chosen) return;
         dir = chosen as string;
       }
-      await view.flush(); // offene Bearbeitung erst speichern — archiviert, was zu sehen ist
+      await entwurf.flush(); // offene Bearbeitung erst speichern — archiviert, was zu sehen ist
       await invoke<string>("panel_archive_cmd", {
         project,
         dir,
@@ -369,7 +345,7 @@ const archiveForm = initArchiveForm(
           defaultPath: "entwurf.md",
         });
         if (!path) return;
-        await view.flush();
+        await entwurf.flush();
         await invoke("panel_save_as", { project, path });
         flash(archiveBtn, "copied", 1400);
       } catch (e) {

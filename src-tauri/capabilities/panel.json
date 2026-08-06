@@ -48,11 +48,11 @@
     "allow-commands-delete",
     "allow-enabled-modules",
     "allow-list-projects",
+    "allow-open-panel-window",
     "allow-project-icon",
     "allow-panel-archive-cmd",
     "allow-panel-title-cmd",
     "allow-panel-archive-dir-cmd",
-    "allow-panel-load",
     "allow-panel-set",
     "allow-panel-clear",
     "allow-reveal-path-cmd",
@@ -62,7 +62,7 @@
     "allow-todos-add",
     "allow-todos-delete",
     "allow-todos-update",
-    "allow-wiki-open",
+    "allow-archive-open",
     "allow-window-buttons-left"
   ]
 }

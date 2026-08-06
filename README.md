@@ -27,7 +27,7 @@ Running Claude Code with multiple accounts or credential sets means hitting the 
 - **Projects** — arbitrary directories carrying their own identity in `<project>/.ai-central/config.json` (UUID, display name, terminal settings, archive home — this file syncs with the project). The machine-local registry `~/.config/ai-central/projects.json` maps that UUID to the directory and the assigned pool; paths under home are stored as `~/…` and therefore stable across machines.
 - **Sessions** — a built-in terminal per project (xterm.js + PTY) that launches Claude Code with the pool's config directory as `CLAUDE_CONFIG_DIR`. Every terminal runs as its own process — on macOS with its own Dock icon and Cmd-Tab entry, on Linux as its own window with its own app id.
 - **Tray** — the app itself is a pure tray app. Clicking the tray icon opens a popup listing all projects with icon and status dot (green = running); clicking a project starts it or brings the running terminal to the front.
-- **Text panel** — a workspace beside the terminal with four tabs: command tiles, the current draft, an archive wiki, and archive search. Claude writes into it through a bundled MCP server instead of flooding the chat.
+- **Text panel** — a workspace beside the terminal with four tabs: command tiles, the current draft, the archive tree, and archive search. Claude writes into it through a bundled MCP server instead of flooding the chat.
 - **Archive** — drafts can be archived as Markdown files into a per-project archive home, curated with folder, description, and tags at archiving time; browsable as a wiki and searchable via full-text search. Notes can also be created there directly — folder, Markdown, HTML, JSON, YAML, XML, plain text — and edited in place. Diagrams live in a hidden `.<note>.res` folder beside their note: out of the file list, and they move and vanish with the note they belong to.
 - **Session watcher** — detects the end of a session by the terminal process disappearing and then (opt-in) syncs the Git repository containing the project: add → commit → pull --rebase → push.
 
@@ -47,7 +47,7 @@ The app ships an MCP stdio server (`ai-central --mcp-panel`, server key `text-pa
 | `show_archive` | Render the archive overview as a wiki page — documents grouped by folder, with descriptions and clickable tag links; with `tag`, that tag's page. |
 | `search_archive` | FTS5 full-text search over the archive (words, "phrases", prefix*); hits appear as tiles in the panel. |
 
-The panel comes in two surfaces. The **session** surface — **Todo**, **Commands**, and the current **document** — docks into the terminal window and can be detached into a window of its own; the **archive** surface — **Wiki** and **Search** (live search, `#tag` filtering) — always opens as its own window, so a note stays open beside the running session. Without a configured archive home the archive tabs stay hidden. The draft's title is taken from its first heading and is editable, as is the content. Spell checking follows `spellcheckLang` (per-text override in the panel).
+The panel comes in two surfaces. The **session** surface — **Todo**, **Commands**, and the current **document** — docks into the terminal window and can be detached into a window of its own; the **archive** surface — **Archive** and **Search** (live search, `#tag` filtering) — always opens as its own window, so a note stays open beside the running session. Without a configured archive home the archive tabs stay hidden. The draft's title is taken from its first heading and is editable, as is the content. Spell checking follows `spellcheckLang` (per-text override in the panel).
 
 Every window carries a font-size rocker in its header, remembered per window kind. Docked, the tiles follow the terminal's font size instead, so both halves of the window read at the same size.
 
@@ -162,7 +162,7 @@ Deleting a project is scoped in three stages, each preceded by a preview of the 
 ├── panel.html            detached text panel window
 ├── popup.html            tray popup
 ├── src/                  frontend: Vue 3 + TypeScript
-│                         (incl. wiki-view, search-view, archive-form,
+│                         (incl. archive-view, search-view, archive-form,
 │                         commands-view, md-editor, html-editor
 │                         + vitest tests)
 ├── src-tauri/

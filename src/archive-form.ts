@@ -41,7 +41,7 @@ export function initArchiveForm(
   function field(labelText: string, placeholder: string): HTMLInputElement {
     const input = document.createElement("input");
     input.type = "text";
-    input.className = "wiki-tree-input";
+    input.className = "archive-tree-input";
     input.placeholder = placeholder;
     box.append(labelled(labelText, input));
     return input;
@@ -66,12 +66,12 @@ export function initArchiveForm(
   // Backdrop trägt die Modal-Optik, die Box das Formular — dieselben Klassen
   // wie die Dialoge der Archiv-Ansicht.
   const form = document.createElement("div");
-  form.className = "archive-form wiki-modal";
+  form.className = "archive-form archive-modal";
   form.hidden = true;
   const box = document.createElement("div");
-  box.className = "wiki-form archive-form-box";
+  box.className = "archive-form archive-form-box";
   const caption = document.createElement("div");
-  caption.className = "wiki-form-title";
+  caption.className = "archive-form-title";
   caption.textContent = t("archiveForm.title");
   box.append(caption);
 
@@ -141,10 +141,10 @@ export function initArchiveForm(
       arrow.classList.add("blank");
     }
     const icon = document.createElement("span");
-    icon.className = "wiki-tree-icon";
+    icon.className = "archive-tree-icon";
     icon.innerHTML = `<svg width="17" height="17" viewBox="0 0 16 16"><circle cx="8" cy="8" r="4.2"/></svg>`;
     const label = document.createElement("span");
-    label.className = "wiki-tree-name";
+    label.className = "archive-tree-name";
     label.textContent = node.title;
     // Der Pfad würde die Zeile überbreit machen; er steht als Tooltip dran.
     row.title = node.path;
@@ -192,11 +192,11 @@ export function initArchiveForm(
     const blank = document.createElement("span");
     blank.className = "archive-arrow blank";
     const icon = document.createElement("span");
-    icon.className = "wiki-tree-icon";
+    icon.className = "archive-tree-icon";
     icon.innerHTML = `<svg width="17" height="17" viewBox="0 0 16 16"><circle cx="8" cy="8" r="4.2"/></svg>`;
     const label = document.createElement("span");
-    label.className = "wiki-tree-name";
-    label.textContent = t("wiki.archive");
+    label.className = "archive-tree-name";
+    label.textContent = t("archive.archive");
     root.append(blank, icon, label);
     root.addEventListener("click", () => select(""));
     browse.replaceChildren(root);
@@ -211,17 +211,17 @@ export function initArchiveForm(
   const tags = field(t("archiveForm.tagsLabel"), t("archiveForm.tags"));
 
   const row = document.createElement("div");
-  row.className = "wiki-form-row";
+  row.className = "archive-form-row";
   const submit = document.createElement("button");
-  submit.className = "archive-form-submit wiki-form-submit";
+  submit.className = "archive-form-submit archive-form-submit";
   submit.textContent = t("archiveForm.submit");
   const cancel = document.createElement("button");
-  cancel.className = "archive-form-cancel wiki-form-cancel";
+  cancel.className = "archive-form-cancel archive-form-cancel";
   cancel.textContent = t("archiveForm.cancel");
   row.append(submit);
   if (opts.onSave) {
     const save = document.createElement("button");
-    save.className = "archive-form-save wiki-form-submit";
+    save.className = "archive-form-save archive-form-submit";
     save.textContent = t("archiveForm.save");
     save.title = t("archiveForm.saveTitle");
     save.addEventListener("click", () => {

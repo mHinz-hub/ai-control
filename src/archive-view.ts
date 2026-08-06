@@ -59,8 +59,8 @@ interface Page {
 }
 
 /// Dokument-/Ordner-Operationen — laufen als Tauri-Commands, der neue Stand
-/// kommt über den Wiki-Puffer zurück.
-export interface WikiActions {
+/// kommt über den Archiv-Puffer zurück.
+export interface ArchiveActions {
   remove(id: string): void;
   /// Neues Kind unterhalb des Knotens (ID; "" = Wurzel).
   createFolder(parent: string, name: string): void;
@@ -80,7 +80,7 @@ export interface WikiActions {
   createText(parent: string, name: string, art: string): Promise<string>;
 }
 
-export interface WikiCallbacks {
+export interface ArchiveCallbacks {
   /// Leeren Puffer sofort mit der Übersicht füllen (eigenes Fenster).
   autoStart?: boolean;
   /// Body eines Archiv-Dokuments (ohne Frontmatter) für die Notiz-Ansicht.
@@ -105,8 +105,8 @@ export interface WikiCallbacks {
   openImage(id: string): void;
   /// Anzeige-Titel einer Notiz setzen (Klick auf den Titel).
   setTitle(id: string, title: string): void;
-  /// Wiki-Ziel laden (`tag:` = Übersicht in den Puffer, Einstiegs-Chip).
-  openWiki(name: string): void;
+  /// Archiv-Ziel laden (`tag:` = Übersicht in den Puffer, Einstiegs-Chip).
+  openArchive(name: string): void;
   /// Vorgemerkte Auswahl (Suchtreffer-Sprung): einmalig abholen.
   takePending?(): string | null;
   /// Wörter des Suchtreffers — sie werden im geöffneten Dokument markiert.
@@ -115,10 +115,10 @@ export interface WikiCallbacks {
   takePart?(): string;
   /// Nummer der gemeinten Fundstelle; 0 = die erste.
   takeSpot?(): number;
-  actions: WikiActions;
+  actions: ArchiveActions;
 }
 
-export interface WikiView {
+export interface ArchiveView {
   set(text: string): void;
   /// Noch keine Seite im Puffer (Session-Start)?
   empty(): boolean;
@@ -138,9 +138,9 @@ type SortFeld = "name" | "changed" | "created";
 
 /// Beschriftungen der Sortierfelder.
 const SORTFELDER: Record<SortFeld, string> = {
-  name: "wiki.sortName",
-  changed: "wiki.sortChanged",
-  created: "wiki.sortCreated",
+  name: "archive.sortName",
+  changed: "archive.sortChanged",
+  created: "archive.sortCreated",
 };
 
 /// JS-Seite der slugify-Semantik aus archive.rs — für die lokale Auflösung
@@ -219,7 +219,7 @@ function buildTree(p: Page): TreeNode {
   return root;
 }
 
-export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiView {
+export function initArchiveView(container: HTMLElement, cb: ArchiveCallbacks): ArchiveView {
   /// Auswahl über die technische ID der Notiz ("" = Archiv-Wurzel);
   /// übersteht Umbenennen, Verschieben und Puffer-Updates. Der Baum kennt
   /// keinen eigenen Klapp-Zustand: offen ist genau der Pfad zur Auswahl.
@@ -315,7 +315,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
         }
       }
     }
-    cb.openWiki(name);
+    cb.openArchive(name);
   }
 
   // ---------- Kontextmenü (rechte Maustaste im Baum) ----------
@@ -323,14 +323,14 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   /// Eigenes Kontextmenü an der Mausposition; Klick daneben oder Escape
   /// schließt. Das Standard-Menü des Webviews ist im ganzen Archiv aus.
   function openMenu(x: number, y: number, items: { label: string; run(): void }[]) {
-    container.querySelector(".wiki-menu")?.remove();
+    container.querySelector(".archive-menu")?.remove();
     const menu = document.createElement("div");
-    menu.className = "wiki-menu";
+    menu.className = "archive-menu";
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
     for (const item of items) {
       const btn = document.createElement("button");
-      btn.className = "wiki-menu-item";
+      btn.className = "archive-menu-item";
       btn.textContent = item.label;
       btn.addEventListener("click", () => {
         menu.remove();
@@ -360,27 +360,27 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   /// die Liste selbst ist die Aussage. Das Menü bleibt offen, damit sich die
   /// Staffelung in einem Zug legen lässt.
   function openSortMenu(x: number, y: number, onChange: () => void) {
-    container.querySelector(".wiki-menu")?.remove();
+    container.querySelector(".archive-menu")?.remove();
     const menu = document.createElement("div");
-    menu.className = "wiki-menu wiki-sort-menu";
+    menu.className = "archive-menu archive-sort-menu";
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
     const zeichnen = () => {
       menu.textContent = "";
       sortOrder.forEach(([feld, richtung], rang) => {
         const zeile = document.createElement("div");
-        zeile.className = "wiki-sort-row" + (rang === 0 ? " first" : "");
+        zeile.className = "archive-sort-row" + (rang === 0 ? " first" : "");
         const name = document.createElement("span");
-        name.className = "wiki-sort-name";
+        name.className = "archive-sort-name";
         name.textContent = t(SORTFELDER[feld]);
         const pfeile = document.createElement("div");
-        pfeile.className = "wiki-sort-dirs";
+        pfeile.className = "archive-sort-dirs";
         for (const dir of ["asc", "desc"] as const) {
           const b = document.createElement("button");
           b.className =
-            "wiki-sort-dir" + (richtung === dir && rang === 0 ? " active" : "");
+            "archive-sort-dir" + (richtung === dir && rang === 0 ? " active" : "");
           b.textContent = dir === "asc" ? "↑" : "↓";
-          b.title = t(dir === "asc" ? "wiki.sortAsc" : "wiki.sortDesc");
+          b.title = t(dir === "asc" ? "archive.sortAsc" : "archive.sortDesc");
           b.addEventListener("click", () => {
             sortOrder = [
               [feld, dir],
@@ -418,7 +418,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     kind: "node" | "nodeOpen" | "doc" | "html" | "epub" | "file" | "diagram" | "image",
   ): HTMLElement {
     const span = document.createElement("span");
-    span.className = "wiki-tree-icon";
+    span.className = "archive-tree-icon";
     const shapes = {
       // Geschlossener Ordner mit Reiter.
       node: `<path d="M1.8 4.6a1 1 0 0 1 1-1h3.1l1.5 1.7h5.8a1 1 0 0 1 1 1v6.1a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1z"/>`,
@@ -459,7 +459,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
       vorschauSicht.unobserve(el);
       cb.readImage(el.dataset.doc!).then(
         (daten) => (el.src = daten),
-        () => el.classList.add("wiki-tree-thumb-leer"),
+        () => el.classList.add("archive-tree-thumb-leer"),
       );
     }
   });
@@ -474,7 +474,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     if (ext === "drawio") return typeIcon("diagram");
     if (BILDENDUNGEN.includes(ext)) {
       const thumb = document.createElement("img");
-      thumb.className = "wiki-tree-thumb";
+      thumb.className = "archive-tree-thumb";
       thumb.alt = "";
       thumb.dataset.doc = doc.id;
       vorschauSicht.observe(thumb);
@@ -493,7 +493,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
 
   function folderRow(name: string, full: string, node: TreeNode): HTMLElement {
     const det = document.createElement("details");
-    det.className = "wiki-tree-folder";
+    det.className = "archive-tree-folder";
     // Offen ist genau der Strang zur Auswahl — nie mehrere Äste zugleich.
     det.open = containsSelected(node);
     const sum = document.createElement("summary");
@@ -511,7 +511,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     // den Ordner aus — das öffnet seinen Strang und schließt alle anderen.
     const icon = typeIcon(det.open ? "nodeOpen" : "node");
     const label = document.createElement("span");
-    label.className = "wiki-tree-name";
+    label.className = "archive-tree-name";
     label.textContent = node.content?.title ?? name;
     sum.addEventListener("contextmenu", (e) => {
       e.preventDefault();
@@ -522,7 +522,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
       openMenu(
         e.clientX,
         e.clientY,
-        id ? anlegeMenue(id) : [{ label: t("wiki.reload"), run: () => cb.openWiki("tag:") }],
+        id ? anlegeMenue(id) : [{ label: t("archive.reload"), run: () => cb.openArchive("tag:") }],
       );
     });
     sum.append(icon, label);
@@ -534,7 +534,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   /// in der Übersicht des jeweiligen Ordners.
   function renderChildren(node: TreeNode, path: string): HTMLElement {
     const box = document.createElement("div");
-    box.className = "wiki-tree-children";
+    box.className = "archive-tree-children";
     for (const [name, child] of [...node.children].sort((a, b) =>
       a[0].localeCompare(b[0]),
     )) {
@@ -545,17 +545,17 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
 
   function renderTree(): HTMLElement {
     const aside = document.createElement("aside");
-    aside.className = "wiki-tree";
+    aside.className = "archive-tree";
     const head = document.createElement("div");
-    head.className = "wiki-tree-head";
+    head.className = "archive-tree-head";
     const root = document.createElement("button");
-    root.className = "wiki-tree-root" + (selected === "" ? " active" : "");
+    root.className = "archive-tree-root" + (selected === "" ? " active" : "");
     // Die Wurzel trägt ihren echten Namen: den Ordnernamen des Archiv-Home —
     // wie jeder andere Ordner im Baum. Offenes Symbol: immer aufgeklappt.
     const rootLabel = document.createElement("span");
-    rootLabel.className = "wiki-tree-name";
+    rootLabel.className = "archive-tree-name";
     rootLabel.textContent =
-      current?.home.replace(/\/+$/, "").split("/").pop() || t("wiki.archive");
+      current?.home.replace(/\/+$/, "").split("/").pop() || t("archive.archive");
     root.append(typeIcon("nodeOpen"), rootLabel);
     root.addEventListener("click", () => select(""));
     root.addEventListener("contextmenu", (e) => {
@@ -571,26 +571,26 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   /// Bestätigungsdialog fürs Löschen: Frage plus Löschen/Abbrechen, gleiche
   /// Optik wie die Anlege-Dialoge.
   function confirmBox(text: string, onOk: () => void) {
-    document.querySelector(".wiki-modal")?.remove();
+    document.querySelector(".archive-modal")?.remove();
     const backdrop = document.createElement("div");
-    backdrop.className = "wiki-modal";
+    backdrop.className = "archive-modal";
     const form = document.createElement("div");
-    form.className = "wiki-form";
+    form.className = "archive-form";
     const caption = document.createElement("div");
-    caption.className = "wiki-form-title";
+    caption.className = "archive-form-title";
     caption.textContent = text;
     const row = document.createElement("div");
-    row.className = "wiki-form-row";
+    row.className = "archive-form-row";
     const ok = document.createElement("button");
-    ok.className = "wiki-form-submit";
-    ok.textContent = t("wiki.deleteFolder");
+    ok.className = "archive-form-submit";
+    ok.textContent = t("archive.deleteFolder");
     ok.addEventListener("click", () => {
       backdrop.remove();
       onOk();
     });
     const cancel = document.createElement("button");
-    cancel.className = "wiki-form-cancel";
-    cancel.textContent = t("wiki.cancel");
+    cancel.className = "archive-form-cancel";
+    cancel.textContent = t("archive.cancel");
     cancel.addEventListener("click", () => backdrop.remove());
     backdrop.addEventListener("mousedown", (e) => {
       if (e.target === backdrop) backdrop.remove();
@@ -604,19 +604,19 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   // ---------- Anlege-Formular (Ordner/Dokument) ----------
 
   function newDocForm(parent: string) {
-    openForm(t("wiki.newDoc"), t("wiki.docName"), "", (v) => {
+    openForm(t("archive.newDoc"), t("archive.docName"), "", (v) => {
       void cb.actions.createDoc(parent, v).then(openNew);
     });
   }
 
   function newHtmlForm(parent: string) {
-    openForm(t("wiki.newHtml"), t("wiki.docName"), "", (v) => {
+    openForm(t("archive.newHtml"), t("archive.docName"), "", (v) => {
       void cb.actions.createHtml(parent, v).then(openNew);
     });
   }
 
   function newFolderForm(parent: string) {
-    openForm(t("wiki.newFolder"), t("wiki.docName"), "", (v) =>
+    openForm(t("archive.newFolder"), t("archive.docName"), "", (v) =>
       cb.actions.createFolder(parent, v),
     );
   }
@@ -625,14 +625,14 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   /// Kontextmenü des Baums.
   function anlegeMenue(parent: string): { label: string; run(): void }[] {
     return [
-      { label: t("wiki.newFolder"), run: () => newFolderForm(parent) },
-      { label: t("wiki.newDoc"), run: () => newDocForm(parent) },
-      { label: t("wiki.newHtml"), run: () => newHtmlForm(parent) },
-      { label: t("wiki.new_text"), run: () => newTextForm(parent, "text") },
-      { label: t("wiki.new_json"), run: () => newTextForm(parent, "json") },
-      { label: t("wiki.new_yaml"), run: () => newTextForm(parent, "yaml") },
-      { label: t("wiki.new_xml"), run: () => newTextForm(parent, "xml") },
-      { label: t("wiki.addFiles"), run: () => cb.actions.importFiles(parent) },
+      { label: t("archive.newFolder"), run: () => newFolderForm(parent) },
+      { label: t("archive.newDoc"), run: () => newDocForm(parent) },
+      { label: t("archive.newHtml"), run: () => newHtmlForm(parent) },
+      { label: t("archive.new_text"), run: () => newTextForm(parent, "text") },
+      { label: t("archive.new_json"), run: () => newTextForm(parent, "json") },
+      { label: t("archive.new_yaml"), run: () => newTextForm(parent, "yaml") },
+      { label: t("archive.new_xml"), run: () => newTextForm(parent, "xml") },
+      { label: t("archive.addFiles"), run: () => cb.actions.importFiles(parent) },
     ];
   }
 
@@ -640,7 +640,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   /// Frontmatter — der Inhalt ist die Datei, angesprochen wird sie über den
   /// Pfad.
   function newTextForm(parent: string, art: "text" | "json" | "yaml" | "xml") {
-    openForm(t(`wiki.new_${art}`), t("wiki.docName"), "", (v) => {
+    openForm(t(`archive.new_${art}`), t("archive.docName"), "", (v) => {
       // Wie bei Notizen: sobald die neue Datei in der Übersicht steht, wird
       // sie ausgewählt und geöffnet.
       void cb.actions.createText(parent, v, art).then(openNew);
@@ -656,26 +656,26 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     initial: string,
     onSubmit: (value: string) => void,
   ) {
-    document.querySelector(".wiki-modal")?.remove();
+    document.querySelector(".archive-modal")?.remove();
     const backdrop = document.createElement("div");
-    backdrop.className = "wiki-modal";
+    backdrop.className = "archive-modal";
     const form = document.createElement("div");
-    form.className = "wiki-form";
+    form.className = "archive-form";
     const caption = document.createElement("div");
-    caption.className = "wiki-form-title";
+    caption.className = "archive-form-title";
     caption.textContent = title;
     const input = document.createElement("input");
-    input.className = "wiki-tree-input";
+    input.className = "archive-tree-input";
     input.placeholder = placeholder;
     input.value = initial;
     const row = document.createElement("div");
-    row.className = "wiki-form-row";
+    row.className = "archive-form-row";
     const submit = document.createElement("button");
-    submit.className = "wiki-form-submit";
-    submit.textContent = t("wiki.create");
+    submit.className = "archive-form-submit";
+    submit.textContent = t("archive.create");
     const cancel = document.createElement("button");
-    cancel.className = "wiki-form-cancel";
-    cancel.textContent = t("wiki.cancel");
+    cancel.className = "archive-form-cancel";
+    cancel.textContent = t("archive.cancel");
     const fire = () => {
       const value = input.value.trim();
       backdrop.remove();
@@ -726,18 +726,18 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     actions: HTMLElement[],
   ): HTMLElement {
     const head = document.createElement("div");
-    head.className = "wiki-note-head";
+    head.className = "archive-note-head";
     const row = document.createElement("div");
-    row.className = "wiki-note-titlerow";
+    row.className = "archive-note-titlerow";
     const back = document.createElement("button");
-    back.className = "wiki-note-back";
-    back.title = t("wiki.back");
+    back.className = "archive-note-back";
+    back.title = t("archive.back");
     back.textContent = "←";
     back.disabled = history.length === 0;
     back.addEventListener("click", goBack);
     row.append(back);
     const h = document.createElement("div");
-    h.className = "wiki-note-title";
+    h.className = "archive-note-title";
     h.textContent = title;
     // Klick auf den Titel bearbeitet ihn direkt (Frontmatter-Titel der
     // Notiz); Enter übernimmt, Escape verwirft. Der technische Datei-/
@@ -747,10 +747,10 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     const titleDoc = findDoc(selected) ?? nodeById(selected)?.content;
     if (titleDoc && titleDoc.kind !== "epub" && titleDoc.kind !== "file" && !editing) {
       h.classList.add("editable");
-      h.title = t("wiki.titleEdit");
+      h.title = t("archive.titleEdit");
       h.addEventListener("click", () => {
         const input = document.createElement("input");
-        input.className = "wiki-note-title-input";
+        input.className = "archive-note-title-input";
         input.value = title;
         input.addEventListener("keydown", (e) => {
           e.stopPropagation();
@@ -764,7 +764,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
       });
     }
     const acts = document.createElement("div");
-    acts.className = "wiki-note-actions";
+    acts.className = "archive-note-actions";
     acts.append(...actions);
     row.append(h, acts);
     head.append(row);
@@ -772,21 +772,21 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     // rechts in den Aktionen; Klick daneben schließt es.
     if (meta.length) {
       const pop = document.createElement("div");
-      pop.className = "wiki-note-info-pop";
+      pop.className = "archive-note-info-pop";
       pop.hidden = true;
       const caption = document.createElement("div");
-      caption.className = "wiki-info-caption";
-      caption.textContent = t("wiki.infoCaption");
+      caption.className = "archive-info-caption";
+      caption.textContent = t("archive.infoCaption");
       pop.append(caption);
       for (const part of meta) {
         const line = document.createElement("div");
-        line.className = "wiki-info-line";
+        line.className = "archive-info-line";
         line.append(part);
         pop.append(line);
       }
       const info = document.createElement("button");
       info.className = "panel-btn";
-      info.title = t("wiki.info");
+      info.title = t("archive.info");
       info.textContent = "ⓘ";
       const close = (e: MouseEvent) => {
         if (e.target === info) return;
@@ -829,7 +829,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   function zeigeFundstellen(body: HTMLElement) {
     if (!fundstellen.length || selected !== fundstellenId) return;
     markiere(body, fundstellen);
-    marken = [...body.querySelectorAll<HTMLElement>("mark.wiki-hit")];
+    marken = [...body.querySelectorAll<HTMLElement>("mark.archive-hit")];
     (marken[fundstelleNr] ?? marken[0])?.scrollIntoView({ block: "center" });
   }
 
@@ -838,7 +838,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   /// die erste.
   function sichtbareFundstelle(): number {
     if (marken.length < 2) return 0;
-    const flaeche = container.querySelector(".wiki-note-scroll");
+    const flaeche = container.querySelector(".archive-note-scroll");
     const kasten = flaeche?.getBoundingClientRect();
     const mitte = kasten ? kasten.top + kasten.height / 2 : window.innerHeight / 2;
     let beste = 0;
@@ -856,7 +856,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
 
   function noteBody(doc: DocEntry): HTMLElement {
     const body = document.createElement("div");
-    body.className = "wiki-note-body";
+    body.className = "archive-note-body";
     cb.readDoc(doc.id).then(
       (text) => {
         if (selected !== doc.id) return;
@@ -881,10 +881,10 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   /// Binärdateien melden den Lesefehler des Backends.
   function fileBody(doc: DocEntry): HTMLElement {
     const body = document.createElement("div");
-    body.className = "wiki-note-body";
+    body.className = "archive-note-body";
     const roh = (text: string) => {
       const pre = document.createElement("pre");
-      pre.className = "wiki-note-plain";
+      pre.className = "archive-note-plain";
       pre.textContent = text;
       return pre;
     };
@@ -902,7 +902,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
       } catch (e) {
         const box = document.createElement("div");
         const meldung = document.createElement("div");
-        meldung.className = "wiki-note-error";
+        meldung.className = "archive-note-error";
         meldung.textContent = String(e);
         box.append(meldung, roh(text));
         return box;
@@ -927,7 +927,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   /// hier steht es, damit die Auswahl in der Liste etwas zeigt.
   function bildBody(doc: DocEntry): HTMLElement {
     const box = document.createElement("div");
-    box.className = "wiki-note-bild";
+    box.className = "archive-note-bild";
     const img = document.createElement("img");
     img.alt = doc.title;
     img.title = t("image.openWindow");
@@ -936,7 +936,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
       (daten) => (img.src = daten),
       (e) => {
         const fehler = document.createElement("div");
-        fehler.className = "wiki-note-error";
+        fehler.className = "archive-note-error";
         fehler.textContent = String(e);
         box.replaceChildren(fehler);
       },
@@ -1049,9 +1049,9 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
       Promise.all([cb.readFile(id), ladeDrawioViewer()]).then(
         ([xml]) => {
           if (drawioLeer(xml)) {
-            span.textContent = t("wiki.emptyDiagram");
+            span.textContent = t("archive.emptyDiagram");
             if (cb.drawioAvailable()) {
-              span.title = t("wiki.editDrawio");
+              span.title = t("archive.editDrawio");
               span.addEventListener("dblclick", () => cb.openDrawio(id));
             }
             return;
@@ -1070,7 +1070,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
           span.classList.add("md-drawio-live");
           zeigeDrawio(el);
           if (cb.drawioAvailable()) {
-            span.title = t("wiki.editDrawio");
+            span.title = t("archive.editDrawio");
             span.addEventListener("dblclick", () => cb.openDrawio(id));
           }
         },
@@ -1083,12 +1083,12 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
 
   function drawioBody(doc: DocEntry): HTMLElement {
     const body = document.createElement("div");
-    body.className = "wiki-note-body wiki-note-drawio";
+    body.className = "archive-note-body archive-note-drawio";
     Promise.all([cb.readFile(doc.id), ladeDrawioViewer()]).then(
       ([xml]) => {
         if (selected !== doc.id) return;
         if (drawioLeer(xml)) {
-          body.textContent = t("wiki.emptyDiagram");
+          body.textContent = t("archive.emptyDiagram");
           return;
         }
         const el = document.createElement("div");
@@ -1121,7 +1121,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   /// fehlendes OPF) stehen im Body, statt still zu verschwinden.
   function epubBody(doc: DocEntry, kopf: HTMLElement): HTMLElement {
     const box = document.createElement("div");
-    box.className = "wiki-note-epub";
+    box.className = "archive-note-epub";
     // Aus der Suche gekommen: Das Buch öffnet beim Kapitel des Treffers, und
     // die Fundstellen darin sind markiert.
     const sprung =
@@ -1137,7 +1137,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
         // Tag und Nacht —, steht bei den übrigen Aktionen in der Titelzeile,
         // vor dem Papierkorb, und trägt dort deren Größe. Nur das Blättern
         // bleibt unten am Buch.
-        const leiste = kopf.querySelector(".wiki-note-actions");
+        const leiste = kopf.querySelector(".archive-note-actions");
         const oben = [".epub-klapp", ".epub-seitig", ".epub-marker", ".epub-kleiner",
                       ".epub-groesser", ".epub-info", ".epub-nacht"]
           .map((sel) => viewer.querySelector(sel))
@@ -1158,9 +1158,9 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   /// normalisieren würde. Fehler erscheinen über dem Editor.
   function noteEditor(doc: DocEntry): { el: HTMLElement; save(): void } {
     const box = document.createElement("div");
-    box.className = "wiki-note-edit";
+    box.className = "archive-note-edit";
     const err = document.createElement("div");
-    err.className = "wiki-note-error";
+    err.className = "archive-note-error";
     err.hidden = true;
     const fail = (e: unknown) => {
       err.hidden = false;
@@ -1196,9 +1196,9 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
       };
     }
     const split = document.createElement("div");
-    split.className = "wiki-edit-split";
+    split.className = "archive-edit-split";
     const preview = document.createElement("div");
-    preview.className = "wiki-note-body wiki-edit-preview";
+    preview.className = "archive-note-body archive-edit-preview";
     let editor: MdEditor | null = null;
     const draw = () => {
       const text = editor?.value() ?? "";
@@ -1222,18 +1222,18 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     // Diagramm einfügen: leere .drawio-Datei im Ressourcen-Ordner, Referenz an
     // der Cursorstelle, dann direkt die Desktop-App zum Zeichnen.
     const bar = document.createElement("div");
-    bar.className = "wiki-edit-toolbar";
+    bar.className = "archive-edit-toolbar";
     const werkzeug = (label: string, titel: string, run: () => void) => {
       const b = document.createElement("button");
       b.type = "button";
-      b.className = "wiki-edit-tool";
+      b.className = "archive-edit-tool";
       b.textContent = label;
       b.title = titel;
       b.addEventListener("click", run);
       return b;
     };
-    const dia = werkzeug(t("wiki.newDiagram"), t("wiki.newDiagram"), () => {
-      openForm(t("wiki.newDiagram"), t("wiki.docName"), "", (v) => {
+    const dia = werkzeug(t("archive.newDiagram"), t("archive.newDiagram"), () => {
+      openForm(t("archive.newDiagram"), t("archive.docName"), "", (v) => {
         void cb.actions.createDrawio(doc.id, v).then((rel) => {
           // Das Diagramm liegt im Ressourcen-Ordner der Notiz; der Verweis
           // steht relativ zu ihr (`./.<notiz>.res/<name>.drawio`).
@@ -1248,7 +1248,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
         });
       });
     });
-    if (!cb.drawioAvailable()) dia.title = t("wiki.drawioMissing");
+    if (!cb.drawioAvailable()) dia.title = t("archive.drawioMissing");
     const tab = werkzeug("⊞", t("html.table"), () =>
       openTableForm(bar, ({ spalten, zeilen, kopf }) => {
         editor?.insert(mdTabelle(spalten, zeilen, kopf));
@@ -1287,9 +1287,9 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   /// wie sie dasteht, ohne Frontmatter.
   function textEditor(doc: DocEntry, sprache: Sprache): { el: HTMLElement; save(): void } {
     const box = document.createElement("div");
-    box.className = "wiki-note-edit";
+    box.className = "archive-note-edit";
     const err = document.createElement("div");
-    err.className = "wiki-note-error";
+    err.className = "archive-note-error";
     err.hidden = true;
     const fail = (e: unknown) => {
       err.hidden = false;
@@ -1325,12 +1325,12 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   /// Kopf-Aktionen im Bearbeitungsmodus: Speichern und Abbrechen.
   function editActions(save: () => void): HTMLElement[] {
     const ok = document.createElement("button");
-    ok.className = "wiki-form-submit";
-    ok.textContent = t("wiki.save");
+    ok.className = "archive-form-submit";
+    ok.textContent = t("archive.save");
     ok.addEventListener("click", save);
     const cancel = document.createElement("button");
-    cancel.className = "wiki-form-cancel";
-    cancel.textContent = t("wiki.cancel");
+    cancel.className = "archive-form-cancel";
+    cancel.textContent = t("archive.cancel");
     cancel.addEventListener("click", abortEdit);
     return [ok, cancel];
   }
@@ -1357,8 +1357,8 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
       const acts: HTMLElement[] = [];
       if (istDrawio(doc) && cb.drawioAvailable()) {
         const edit = document.createElement("button");
-        edit.className = "panel-btn wiki-drawio-edit";
-        edit.title = t("wiki.editDrawio");
+        edit.className = "panel-btn archive-drawio-edit";
+        edit.title = t("archive.editDrawio");
         edit.textContent = "✎";
         edit.addEventListener("click", () => cb.openDrawio(doc.id));
         acts.push(edit);
@@ -1366,7 +1366,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
       // Ein Bild gehört groß und neben seinesgleichen — dafür das Fenster.
       if (istBild(doc)) {
         const fenster = document.createElement("button");
-        fenster.className = "panel-btn wiki-bild-fenster";
+        fenster.className = "panel-btn archive-bild-fenster";
         fenster.title = t("image.openWindow");
         fenster.textContent = "⧉";
         fenster.addEventListener("click", () => cb.openImage(doc.id));
@@ -1377,7 +1377,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
       if (spracheZu(doc.relpath)) {
         const edit = document.createElement("button");
         edit.className = "panel-btn";
-        edit.title = t("wiki.editDoc");
+        edit.title = t("archive.editDoc");
         edit.textContent = "✎";
         edit.addEventListener("click", () => {
           editing = true;
@@ -1385,18 +1385,18 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
         });
         acts.push(edit);
       }
-      acts.push(deleteAction(t("wiki.deleteDoc"), () => cb.actions.remove(doc.id)));
+      acts.push(deleteAction(t("archive.deleteDoc"), () => cb.actions.remove(doc.id)));
       return acts;
     }
     const edit = document.createElement("button");
     edit.className = "panel-btn";
-    edit.title = t("wiki.editDoc");
+    edit.title = t("archive.editDoc");
     edit.textContent = "✎";
     edit.addEventListener("click", () => {
       editing = true;
       renderMain();
     });
-    return [edit, deleteAction(t("wiki.deleteDoc"), () => cb.actions.remove(doc.id))];
+    return [edit, deleteAction(t("archive.deleteDoc"), () => cb.actions.remove(doc.id))];
   }
 
   /// Kindzeile im Dokument-Abschnitt: Titel links, Anlage-/Änderungsdatum
@@ -1408,22 +1408,22 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     folder: { path: string; leer: boolean } | null = null,
   ): HTMLElement {
     const wrap = document.createElement("div");
-    wrap.className = "wiki-doc-row";
+    wrap.className = "archive-doc-row";
     const row = document.createElement("div");
-    row.className = folder ? "wiki-doc" : "wiki-doc wiki-doc-entry";
+    row.className = folder ? "archive-doc" : "archive-doc archive-doc-entry";
     const line = document.createElement("div");
-    line.className = "wiki-doc-line";
+    line.className = "archive-doc-line";
     // Typ-Symbol groß über beide Zeilen; rechts davon die Textspalte:
     // Titel, darunter die Beschreibung.
     const textcol = document.createElement("div");
-    textcol.className = "wiki-doc-text";
+    textcol.className = "archive-doc-text";
     const head = document.createElement("div");
-    head.className = "wiki-doc-title";
+    head.className = "archive-doc-title";
     head.textContent = title;
     textcol.append(head);
     if (doc?.description) {
       const desc = document.createElement("div");
-      desc.className = "wiki-doc-desc";
+      desc.className = "archive-doc-desc";
       desc.textContent = doc.description;
       textcol.append(desc);
     }
@@ -1432,14 +1432,14 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
       // Zweizeilig rechts: erstellt über geändert; der volle Zeitstempel
       // der Änderung steht im Hover.
       const dates = document.createElement("div");
-      dates.className = "wiki-doc-date";
+      dates.className = "archive-doc-date";
       if (doc.date) {
         const created = document.createElement("div");
-        created.textContent = t("wiki.createdAt", { date: doc.date });
+        created.textContent = t("archive.createdAt", { date: doc.date });
         dates.append(created);
       }
       const changed = document.createElement("div");
-      changed.textContent = t("wiki.changedAt", { date: doc.modified.slice(0, 10) });
+      changed.textContent = t("archive.changedAt", { date: doc.modified.slice(0, 10) });
       changed.title = doc.modified.replace("T", " ").replace("Z", " UTC");
       dates.append(changed);
       line.append(dates);
@@ -1448,12 +1448,12 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     // Aktionen HINTER der Kachel (außerhalb, immer sichtbar): im
     // Dateimanager zeigen und Löschen — für Dokumente wie für Ordner.
     const acts = document.createElement("div");
-    acts.className = "wiki-row-actions";
+    acts.className = "archive-row-actions";
     const rel = folder ? folder.path : doc?.relpath;
     if (rel) {
       const reveal = document.createElement("button");
       reveal.className = "panel-btn";
-      reveal.title = t("wiki.reveal");
+      reveal.title = t("archive.reveal");
       reveal.innerHTML = `<svg viewBox="0 0 16 16"><path d="M6.4 3.6H3.6a1.1 1.1 0 0 0-1.1 1.1v7.7a1.1 1.1 0 0 0 1.1 1.1h7.7a1.1 1.1 0 0 0 1.1-1.1V9.6"/><path d="M9.6 2.5h3.9v3.9"/><path d="M13.3 2.7 7.9 8.1"/></svg>`;
       reveal.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -1462,17 +1462,17 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
       acts.append(reveal);
     }
     const del = folder
-      ? deleteAction(t("wiki.deleteFolder"), () =>
+      ? deleteAction(t("archive.deleteFolder"), () =>
           // Ein voller Ordner fragt nach — remove_dir_all nimmt den ganzen
           // Teilbaum mit; ein leerer löscht direkt.
           folder.leer
             ? cb.actions.removeFolder(folder.path)
-            : confirmBox(t("wiki.confirmDeleteFolder", { name: title }), () =>
+            : confirmBox(t("archive.confirmDeleteFolder", { name: title }), () =>
                 cb.actions.removeFolder(folder.path),
               ),
         )
       : doc
-        ? deleteAction(t("wiki.deleteDoc"), () => cb.actions.remove(doc.id))
+        ? deleteAction(t("archive.deleteDoc"), () => cb.actions.remove(doc.id))
         : null;
     if (del) {
       del.addEventListener("click", (e) => e.stopPropagation());
@@ -1487,14 +1487,14 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
         e.preventDefault();
         e.stopPropagation();
         const edit = {
-          label: t("wiki.editDoc"),
+          label: t("archive.editDoc"),
           run: () => {
             select(doc.id);
             editing = true;
             renderMain();
           },
         };
-        const remove = { label: t("wiki.deleteDoc"), run: () => cb.actions.remove(doc.id) };
+        const remove = { label: t("archive.deleteDoc"), run: () => cb.actions.remove(doc.id) };
         // Bücher und sonstige Dateien werden angezeigt, nicht bearbeitet.
         openMenu(
           e.clientX,
@@ -1508,7 +1508,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
 
   function renderMain() {
     const p = current!;
-    const main = container.querySelector<HTMLElement>(".wiki-main")!;
+    const main = container.querySelector<HTMLElement>(".archive-main")!;
     main.textContent = "";
     // Der alte Editor ist mit dem Inhalt weg; einen neuen setzt noteEditor.
     previewRedraw = null;
@@ -1519,7 +1519,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     // auch horizontal, wenn ein Diagramm breiter ist als das Fenster.
     const scroller = (...els: HTMLElement[]) => {
       const s = document.createElement("div");
-      s.className = "wiki-note-scroll";
+      s.className = "archive-note-scroll";
       s.append(...els);
       return s;
     };
@@ -1576,8 +1576,8 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     // dieselben Wege wie im Kontextmenü des Baums, nur erreichbar ohne
     // rechte Maustaste.
     const add = document.createElement("button");
-    add.className = "wiki-add";
-    add.title = t("wiki.newEntry");
+    add.className = "archive-add";
+    add.title = t("archive.newEntry");
     add.textContent = "+";
     add.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1595,15 +1595,15 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     // Suchfeld (filtert nur die angezeigte Liste) und Sortier-Widget der
     // Datei-Übersicht — beide in der Titelzeile, keine Spaltenfilter.
     const filter = document.createElement("input");
-    filter.className = "wiki-filter";
+    filter.className = "archive-filter";
     filter.type = "search";
-    filter.title = t("wiki.filterDocs");
-    filter.setAttribute("aria-label", t("wiki.filterDocs"));
+    filter.title = t("archive.filterDocs");
+    filter.setAttribute("aria-label", t("archive.filterDocs"));
     filter.value = docFilter;
     // Sortier-Knopf: zeigt die geltende erste Stufe im Klartext, öffnet das
     // Rangfolge-Menü.
     const sort = document.createElement("button");
-    sort.className = "wiki-sort";
+    sort.className = "archive-sort";
     const sortLabel = () => {
       const [feld, richtung] = sortOrder[0];
       sort.textContent = `${t(SORTFELDER[feld])} ${richtung === "asc" ? "↑" : "↓"}`;
@@ -1626,7 +1626,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
 
     const buildList = () => {
       const list = document.createElement("div");
-      list.className = "wiki-note-children";
+      list.className = "archive-note-children";
       const q = docFilter.trim().toLowerCase();
       const ordner = [...node.children]
         .filter(
@@ -1635,9 +1635,9 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
         .sort((a, b) => a[0].localeCompare(b[0]));
       const docs = [...node.docs].filter((d) => !q || d.title.toLowerCase().includes(q)).sort(docOrder);
       const caption = document.createElement("div");
-      caption.className = "wiki-children-caption";
+      caption.className = "archive-children-caption";
       const n = ordner.length + docs.length;
-      caption.textContent = t(n === 1 ? "wiki.docOne" : "wiki.docMany", { count: n });
+      caption.textContent = t(n === 1 ? "archive.docOne" : "archive.docMany", { count: n });
       list.append(caption);
       for (const [name, child] of ordner) {
         const childId = child.content?.id ?? "";
@@ -1675,7 +1675,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     // Suche und Sortierung gehören zusammen; abgesetzt wird nur der Block
     // der Aktions-Knöpfe dahinter.
     const trenner = document.createElement("span");
-    trenner.className = "wiki-head-sep";
+    trenner.className = "archive-head-sep";
     const head = noteHead(title, meta, [filter, sort, trenner, ...actions]);
     const scroll = scroller();
     main.append(head, scroll);
@@ -1684,18 +1684,18 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
     } else {
       // Jede Ordner-Notiz trägt von Haus aus Text — im Default ihren Namen.
       const body = document.createElement("div");
-      body.className = "wiki-note-body default";
+      body.className = "archive-note-body default";
       body.textContent = title;
       scroll.append(body);
     }
 
     if (children === 0 && !node.content) {
       const empty = document.createElement("div");
-      empty.className = "wiki-empty";
+      empty.className = "archive-empty";
       const line = document.createElement("strong");
-      line.textContent = p.total === 0 ? t("wiki.emptyArchive") : t("wiki.emptyFolder");
+      line.textContent = p.total === 0 ? t("archive.emptyArchive") : t("archive.emptyFolder");
       empty.append(line);
-      if (p.total === 0) empty.append(t("wiki.emptyHint"));
+      if (p.total === 0) empty.append(t("archive.emptyHint"));
       scroll.append(empty);
       return;
     }
@@ -1736,13 +1736,13 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
   function render() {
     container.textContent = "";
     const layout = document.createElement("div");
-    layout.className = "wiki-layout";
+    layout.className = "archive-layout";
     const main = document.createElement("div");
-    main.className = "wiki-main";
+    main.className = "archive-main";
     const tree = renderTree();
     tree.style.flexBasis = `${treeWidth}px`;
     const grip = document.createElement("div");
-    grip.className = "wiki-splitter";
+    grip.className = "archive-splitter";
     grip.addEventListener("mousedown", (e) => {
       e.preventDefault();
       const startX = e.clientX;
@@ -1765,7 +1765,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
 
   /// Leerer Puffer: die Übersicht direkt anfordern — das Archiv startet
   /// von selbst, ohne Einstiegs-Klick. Nur einmal, das Update kommt über
-  /// den Wiki-Puffer zurück.
+  /// den Archiv-Puffer zurück.
   let requested = false;
 
   // Standard-Kontextmenü des Webviews im Archiv aus — es gibt nur unser
@@ -1782,7 +1782,7 @@ export function initWikiView(container: HTMLElement, cb: WikiCallbacks): WikiVie
         current = null;
         if (cb.autoStart && !requested) {
           requested = true;
-          cb.openWiki("tag:");
+          cb.openArchive("tag:");
         }
         return;
       }

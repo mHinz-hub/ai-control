@@ -1,5 +1,5 @@
 /// Markdown-Rendering fürs Panel — eine gemeinsame, entschärfte marked-Instanz
-/// für Dokument-Tab und Wiki.
+/// für Entwurf und Archiv.
 ///
 /// Warum überhaupt entschärft: marked reicht seit v5 rohes HTML unverändert
 /// durch (die alte `sanitize`-Option gibt es nicht mehr), und das Ergebnis geht

@@ -5,7 +5,7 @@
 /// Suche gefunden hat, auch bei Präfix-Suche (`arch*` → „Archiv").
 
 /// Umschließt jedes Vorkommen der Wörter im Text unterhalb von `root` mit
-/// `<mark class="wiki-hit">` und liefert die erste Marke — das Ziel zum
+/// `<mark class="archive-hit">` und liefert die erste Marke — das Ziel zum
 /// Hinscrollen. Groß- und Kleinschreibung spielen keine Rolle.
 export function markiere(root: HTMLElement, woerter: string[]): HTMLElement | null {
   const gesucht = [...new Set(woerter.map((w) => w.trim().toLowerCase()).filter(Boolean))];
@@ -37,7 +37,7 @@ export function markiere(root: HTMLElement, woerter: string[]): HTMLElement | nu
       if (s.von < pos) continue;
       if (s.von > pos) teile.append(text.slice(pos, s.von));
       const m = document.createElement("mark");
-      m.className = "wiki-hit";
+      m.className = "archive-hit";
       m.textContent = text.slice(s.von, s.bis);
       teile.append(m);
       erste ??= m;

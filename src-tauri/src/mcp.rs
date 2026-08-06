@@ -289,7 +289,7 @@ fn tool_def(name: &str) -> Value {
     "show_archive" => json!({
           "name": "show_archive",
           "description":
-            "Zeigt die Archiv-Übersicht des Projekts als Wiki-Seite im Panel: \
+            "Zeigt die Archiv-Übersicht des Projekts als Archiv-Seite im Panel: \
              Dokumente nach Ordnern gruppiert, mit Beschreibungen und \
              klickbaren Schlagwort-Links. Mit `tag` stattdessen die Seite eines \
              Schlagworts. Nutzen, wenn der Nutzer das Archiv sehen will \
@@ -597,8 +597,8 @@ fn call_archive(req: &Value) -> Value {
   }
 }
 
-/// Archiv-Übersicht bzw. Schlagwort-Seite generieren und in den Wiki-Puffer
-/// schreiben — der Watcher zieht sie als Wiki-Ansicht ins Panel.
+/// Archiv-Übersicht bzw. Schlagwort-Seite generieren und in den Archiv-Puffer
+/// schreiben — der Watcher zieht sie als Archiv-Ansicht ins Panel.
 fn call_show_archive(req: &Value) -> Value {
   let project = std::env::var("AI_CENTRAL_PROJECT").unwrap_or_default();
   let home = match crate::domain::archive::require_archive_home(&project) {
@@ -624,7 +624,7 @@ fn call_show_archive(req: &Value) -> Value {
     Ok(page) => page,
     Err(e) => return err(e),
   };
-  let path = match env_path("AI_CENTRAL_WIKI") {
+  let path = match env_path("AI_CENTRAL_ARCHIVE") {
     Ok(path) => path,
     Err(e) => return e,
   };
@@ -637,7 +637,7 @@ fn call_show_archive(req: &Value) -> Value {
       Some(t) => format!("Schlagwort-Seite #{t} im Panel."),
       None => "Archiv-Übersicht im Panel.".to_string(),
     }),
-    Err(e) => err(format!("Wiki-Datei nicht schreibbar: {e}")),
+    Err(e) => err(format!("Archiv-Datei nicht schreibbar: {e}")),
   }
 }
 

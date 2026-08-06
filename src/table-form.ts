@@ -77,11 +77,11 @@ export function openTableForm(
 
   const ok = document.createElement("button");
   ok.type = "submit";
-  ok.className = "wiki-form-submit";
+  ok.className = "archive-form-submit";
   ok.textContent = t("html.insert");
   const ab = document.createElement("button");
   ab.type = "button";
-  ab.className = "wiki-form-cancel";
+  ab.className = "archive-form-cancel";
   ab.textContent = t("html.cancel");
   const knoepfe = document.createElement("div");
   knoepfe.className = "table-form-actions";

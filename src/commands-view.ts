@@ -7,7 +7,14 @@
 
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { storedLocale, t } from "./messages";
-import { copyAction, deleteAction, flash, renderTile, stripInvisibles } from "./tiles";
+import {
+  actionBar,
+  copyAction,
+  deleteAction,
+  flash,
+  renderTile,
+  stripInvisibles,
+} from "./tiles";
 
 interface CommandEntry {
   cmd: string;
@@ -95,8 +102,10 @@ export function initCommandsView(
               ...(entry.note ? [{ cls: "cmd-note", text: entry.note }] : []),
             ],
             actions: [
-              copyAction(t("commands.copyOne"), () => visible),
-              deleteAction(t("commands.removeOne"), () => onDelete(entry.id ?? "")),
+              actionBar(
+                copyAction(t("commands.copyOne"), () => visible),
+                deleteAction(t("commands.removeOne"), () => onDelete(entry.id ?? "")),
+              ),
             ],
           }),
         );
@@ -131,6 +140,9 @@ export interface ModeTab {
   /// Titelzeilen-Text, wenn der Tab aktiv ist (der Entwurfs-Tab behält
   /// seinen Dokument-Titel).
   label: string;
+  /// Erklärender Text im Hover — er benennt die Ansicht auch dann, wenn der
+  /// Tab nur als Buchstabe dasteht.
+  titel: string;
   /// Ein-Buchstaben-Form: der Tab trägt sie, solange er nicht aktiv ist.
   kurz?: string;
   onActivate?: () => void;
@@ -146,8 +158,10 @@ export function initPanelMode(opts: {
   titleEl: HTMLElement;
   flush: () => void;
 }) {
-  // `null` = kein Tab aktiv (Panel zugeklappt).
-  let mode: PanelMode | null = "draft";
+  // `null` = kein Tab aktiv (Panel zugeklappt). Womit eine Fläche startet,
+  // setzt ihr Aufrufer: das Dock über `standard()`, das eigene Fenster über
+  // den Tab aus seiner URL.
+  let mode: PanelMode | null = null;
   let draftTitle = "";
   /// Breite des längsten Sitzungs-Tab-Wortes; steht erst nach dem Messen.
   let aktivBreite = 0;
@@ -157,11 +171,11 @@ export function initPanelMode(opts: {
       if (tab.content) tab.content.hidden = mode !== tab.mode;
       const aktiv = tab.mode === mode;
       tab.btn.classList.toggle("active", aktiv);
+      tab.btn.title = tab.titel;
       // Sitzungs-Tabs: der aktive schreibt sich aus, die anderen stehen als
-      // Buchstabe da und nennen ihren Namen im Hover.
+      // Buchstabe da; was sie zeigen, sagt der Hover.
       if (tab.kurz) {
         tab.btn.textContent = aktiv ? tab.label : tab.kurz;
-        tab.btn.title = tab.label;
         if (aktivBreite) tab.btn.style.width = aktiv ? `${aktivBreite}px` : "2em";
       }
     }
@@ -176,15 +190,20 @@ export function initPanelMode(opts: {
     if (mode === "draft") draftTitle = opts.titleEl.textContent || t("panel.tabDraft");
     mode = m;
     apply();
-    if (m === "draft") opts.titleEl.textContent = draftTitle;
+    // Zurück zum Entwurf: sein Titel stand zuletzt in der Zeile. Solange der
+    // Entwurf noch nie vorn war, gibt es nichts zu restaurieren — dann bringt
+    // ihn der Inhalt mit, der gleich gesetzt wird.
+    if (m === "draft" && draftTitle) opts.titleEl.textContent = draftTitle;
   }
 
   /// Auswahl aufheben (Panel zugeklappt) — der nächste to()-Aufruf oder
-  /// Tab-Klick wählt wieder aus.
+  /// Tab-Klick wählt wieder aus. Über `apply()`, damit auch Beschriftung und
+  /// Breite der Sitzungs-Tabs zurückfallen: ohne Auswahl steht keiner mehr
+  /// ausgeschrieben da.
   function clear() {
     if (mode === "draft") draftTitle = opts.titleEl.textContent || t("panel.tabDraft");
     mode = null;
-    for (const tab of opts.tabs) tab.btn.classList.remove("active");
+    apply();
   }
 
   for (const tab of opts.tabs) {
@@ -203,13 +222,9 @@ export function initPanelMode(opts: {
     for (const tab of opts.tabs) {
       if (!tab.kurz) continue;
       const text = tab.btn.textContent;
-      const versteckt = tab.btn.hidden;
-      tab.btn.hidden = false;
-      tab.btn.style.width = "";
       tab.btn.textContent = tab.label;
       aktivBreite = Math.max(aktivBreite, tab.btn.offsetWidth);
       tab.btn.textContent = text;
-      tab.btn.hidden = versteckt;
     }
     apply();
   });

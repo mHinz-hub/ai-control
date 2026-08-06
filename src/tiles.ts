@@ -29,6 +29,16 @@ export function panelToast(msg: string) {
   setTimeout(() => t.remove(), 5000);
 }
 
+/// Knopfleiste einer Kachel: die Aktionen in einer Zeile oben rechts. Die
+/// Kacheln tragen keinen Titel, an dem die Knöpfe sitzen könnten — als Leiste
+/// darüber bleibt dem Text die ganze Breite.
+export function actionBar(...knoepfe: HTMLElement[]): HTMLElement {
+  const div = document.createElement("div");
+  div.className = "tile-actions";
+  div.append(...knoepfe);
+  return div;
+}
+
 /// Kopier-Knopf: legt `text()` in die Zwischenablage, quittiert mit Flash.
 export function copyAction(title: string, text: () => string): HTMLButtonElement {
   const btn = document.createElement("button");

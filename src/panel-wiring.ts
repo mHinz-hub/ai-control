@@ -16,12 +16,18 @@ import { t } from "./messages";
 import "./panel-tiles.css";
 
 export interface PanelWiring {
-  view: PanelView;
+  /// Entwurfs-Ansicht — nur auf der Sitzungsfläche; das Archiv-Fenster kennt
+  /// keinen Entwurf.
+  view: PanelView | null;
   /// Modul-Ansichten nach Tab-Modus; enthält nur Tabs aktiver Module.
   views: Map<string, ModuleView>;
-  mode: { to(m: PanelMode): void; clear(): void; current(): PanelMode | null };
-  /// Entwurfstext beim Start (für die Anfangs-Modus-Entscheidung).
-  draft: string;
+  mode: {
+    to(m: PanelMode): void;
+    clear(): void;
+    current(): PanelMode | null;
+    /// Auf den Standard-Reiter schalten: ToDo, sonst Befehle.
+    standard(): void;
+  };
 }
 
 export async function wirePanel(
@@ -32,12 +38,16 @@ export async function wirePanel(
   flaeche = "archiv",
 ): Promise<PanelWiring> {
   const titleEl = document.querySelector(".panel-title") as HTMLElement;
+  // Der Entwurf gehört zur Sitzung: angedockt und im abgelösten
+  // Sitzungs-Fenster. Das Archiv-Fenster liest ihn nicht einmal — es
+  // bearbeitet seine Dokumente selbst, mit seinen eigenen Werkzeugen.
+  const sitzung = !standalone || flaeche === "sitzung";
   const [enabled, defaultLang, draft] = await Promise.all([
     invoke<string[]>("enabled_modules", { project }),
     invoke<string>("spellcheck_lang"),
-    invoke<string>("buffer_read", { project, buffer: "panel" }),
+    sitzung ? invoke<string>("buffer_read", { project, buffer: "panel" }) : "",
   ]);
-  // Zwei Flächen: das Archiv (Wiki, Suche) und die Sitzung (Entwurf, Befehle,
+  // Zwei Flächen: das Archiv (Archiv, Suche) und die Sitzung (Entwurf, Befehle,
   // Aufgaben). Angedockt zeigt das Panel die Sitzung und die Archiv-Tabs als
   // Öffner-Knöpfe (terminal.ts fängt den Klick). Abgelöst zeigt ein Fenster
   // genau eine der beiden Flächen — beide dürfen nebeneinander stehen.
@@ -48,7 +58,7 @@ export async function wirePanel(
   // Ohne Archiv-Modul (abgewählt oder kein Archiv-Home) verschwinden auch
   // die Archiv-Werkzeuge des Entwurfs-Tabs.
   if (!enabled.includes("archive")) {
-    for (const sel of ["#panel-archive", "#panel-wiki-jump"]) {
+    for (const sel of ["#panel-archive", "#panel-archive-jump"]) {
       const el = document.querySelector<HTMLElement>(sel)!;
       el.hidden = true;
       // Raus aus der draft-only-Menge, sonst blendet der Modus-Umschalter
@@ -57,35 +67,40 @@ export async function wirePanel(
     }
   }
 
-  // Jeder Wiki-Sprung (Wikilink, Chip, Dokument-Sprung) geht als ein Invoke an
-  // den Kern; das Ergebnis kommt über den Wiki-Puffer und `wiki-update` zurück.
+  // Jeder Archiv-Sprung (Wikilink, Chip, Dokument-Sprung) geht als ein Invoke an
+  // den Kern; das Ergebnis kommt über den Archiv-Puffer und `archive-update` zurück.
   // Fehler (z. B. Ziel nicht im Archiv) erscheinen als Toast.
-  const openWiki = (name: string) =>
-    void invoke("wiki_open", { project, name }).catch((e) => panelToast(String(e)));
+  const openArchive = (name: string) =>
+    void invoke("archive_open", { project, name }).catch((e) => panelToast(String(e)));
 
   const ctx: ModuleCtx = {
     project,
     standalone,
     toast: panelToast,
-    openDoc: (path) =>
-      void invoke("panel_load", { project, path }).catch((e) => panelToast(String(e))),
-    openWiki,
+    openArchive,
   };
 
-  const view = initPanelView({
-    content: document.getElementById("panel-content")!,
-    copyBtn: document.getElementById("panel-copy")!,
-    copyHtmlBtn: document.getElementById("panel-copy-html")!,
-    printBtn: document.getElementById("panel-print")!,
-    modeBtn: document.getElementById("panel-mode")!,
-    titleEl,
-    editBtn: document.getElementById("panel-title-edit")!,
-    editContentBtn: document.getElementById("panel-content-edit")!,
-    langSelect: document.getElementById("panel-lang") as HTMLSelectElement,
-    defaultLang,
-    onCommit: (text) => invoke("panel_set", { project, text }),
-    onWikiLink: openWiki,
-  });
+  // Entwurfs-Ansicht samt Werkzeugleiste gibt es nur auf der Sitzungsfläche.
+  // Im Archiv-Fenster bleibt ihr Container leer und aus dem Weg — er ist dort
+  // nur noch der Anker, hinter dem sich die Modul-Container einreihen.
+  const draftContent = document.getElementById("panel-content")!;
+  const view = sitzung
+    ? initPanelView({
+        content: draftContent,
+        copyBtn: document.getElementById("panel-copy")!,
+        copyHtmlBtn: document.getElementById("panel-copy-html")!,
+        printBtn: document.getElementById("panel-print")!,
+        modeBtn: document.getElementById("panel-mode")!,
+        titleEl,
+        editBtn: document.getElementById("panel-title-edit")!,
+        editContentBtn: document.getElementById("panel-content-edit")!,
+        langSelect: document.getElementById("panel-lang") as HTMLSelectElement,
+        defaultLang,
+        onCommit: (text) => invoke("panel_set", { project, text }),
+        onWikiLink: openArchive,
+      })
+    : null;
+  if (!view) draftContent.hidden = true;
 
   // Tab-Leiste und Container aus der Registry. Die Container-IDs
   // (`<mode>-content`) sind zugleich die CSS-Anker der Ansichten; die
@@ -102,7 +117,6 @@ export async function wirePanel(
   // Ansicht hängt an den draftEls, einen Container braucht er nicht. Er zeigt
   // sich, sobald es einen Entwurf gibt; ohne Entwurf bleibt sein Platz stehen
   // (`visibility` statt `hidden`), damit die Leiste ihre Breite behält.
-  const sitzung = !standalone || flaeche === "sitzung";
   let entwurfBtn: HTMLButtonElement | null = null;
   /// Reiter zeigen oder seinen Platz leer stehen lassen.
   const entwurfZeigen = (da: boolean) => {
@@ -120,6 +134,7 @@ export async function wirePanel(
       btn: entwurfBtn,
       content: null,
       label: t("panel.tabEntwurf"),
+      titel: t("panel.tabEntwurfTitle"),
       kurz: t("panel.tabEntwurfKurz"),
     });
   }
@@ -128,7 +143,6 @@ export async function wirePanel(
     btn.className = "panel-btn";
     btn.dataset.mode = tab.mode;
     btn.textContent = t(tab.labelKey);
-    btn.title = t(tab.titleKey);
     tabsEl.append(btn);
     // Der Trenner steht zwischen zwei Gruppen — hinter dem letzten Tab
     // trennt er nichts und entfällt (im Archiv-Fenster gibt es nur die
@@ -157,6 +171,7 @@ export async function wirePanel(
       btn,
       content,
       label: t(tab.labelKey),
+      titel: t(tab.titleKey),
       kurz: tab.kurzKey ? t(tab.kurzKey) : undefined,
       onActivate: tab.onActivate
         ? () => tab.onActivate!(views.get(tab.mode)!, ctx)
@@ -169,52 +184,56 @@ export async function wirePanel(
     document.querySelector<HTMLElement>(".panel-head")!.hidden = true;
   }
 
-  const mode = initPanelMode({
+  const kern = initPanelMode({
     tabs: modeTabs,
-    draftEls: [
-      document.getElementById("panel-content")!,
-      ...document.querySelectorAll<HTMLElement>(".draft-only"),
-    ],
+    draftEls: view
+      ? [draftContent, ...document.querySelectorAll<HTMLElement>(".draft-only")]
+      : [],
     titleEl,
-    flush: () => void view.flush(),
+    flush: () => void view?.flush(),
   });
+  // Ein Reiter ist immer gewählt: ohne Entwurf die Aufgaben, ohne die die
+  // Befehle. Nur wenn es weder das eine noch das andere Modul gibt, bleibt
+  // die Fläche ohne Auswahl.
+  const mode = {
+    ...kern,
+    standard() {
+      const m = ["todo", "commands"].find((tab) => views.has(tab));
+      if (m) kern.to(m);
+      else kern.clear();
+    },
+  };
 
-  // Sprung Dokument → Wiki: öffnet den Archiv-Navigator (Dokumentseiten im
-  // Wiki gibt es nicht mehr — Dokumente öffnen immer im Dokument-Tab).
-  document
-    .getElementById("panel-wiki-jump")!
-    .addEventListener("click", () => openWiki("tag:"));
+  // Der Entwurf und das Archiv sind zwei Fenster: Der Sprung aus der
+  // Entwurfs-Leiste holt erst das Archiv-Fenster nach vorn (oder baut es) und
+  // schickt es dann in den Namensraum der Schlagwörter.
+  if (view) {
+    document.getElementById("panel-archive-jump")!.addEventListener("click", async () => {
+      await invoke("open_panel_window", { project, mode: "archive" });
+      openArchive("tag:");
+    });
 
-  // Lese-Flächen: die Archiv-Tabs (Wiki, Suche). Sie leben im eigenen Fenster,
-  // und dort darf ein hereinkommender Entwurf den Baum nicht wegreißen.
-  const leseModi = new Set(PANEL_TABS.filter((tab) => tab.popupOnly).map((tab) => tab.mode));
-
-  view.set(draft);
-  await listen<string>("panel-update", (e) => {
-    // Erst umschalten, dann setzen: to("draft") restauriert den gemerkten
-    // Titel — der neue Inhalt (und damit sein Titel) muss danach kommen.
-    // Auf der Sitzungsfläche (Dock, abgelöste Sitzung) gewinnt der Entwurf:
-    // wer einen Text ins Panel schreibt, will ihn sehen, auch wenn zuletzt
-    // ToDos oder Befehle offen standen. Im Archiv-Fenster bleibt der Leser.
-    // Der Reiter folgt dem Entwurf: Text da, Reiter da — verworfener Entwurf
-    // (leerer Puffer) nimmt ihn wieder mit, und die Ansicht geht zu den
-    // Aufgaben, damit die Fläche nicht leer stehen bleibt.
-    const leer = !e.payload.trim();
-    entwurfZeigen(!leer);
-    if (leer) {
-      view.set(e.payload);
-      if (mode.current() === "draft") {
-        const zurueck = ["todo", "commands"].find((m) => views.has(m));
-        if (zurueck) mode.to(zurueck);
-        else mode.clear();
+    view.set(draft);
+    await listen<string>("panel-update", (e) => {
+      // Erst umschalten, dann setzen: to("draft") restauriert den gemerkten
+      // Titel — der neue Inhalt (und damit sein Titel) muss danach kommen.
+      // Der Entwurf gewinnt: wer einen Text ins Panel schreibt, will ihn
+      // sehen, auch wenn zuletzt ToDos oder Befehle offen standen. Der Reiter
+      // folgt ihm: Text da, Reiter da — verworfener Entwurf (leerer Puffer)
+      // nimmt ihn wieder mit, und die Ansicht geht zu den Aufgaben, damit die
+      // Fläche nicht leer stehen bleibt.
+      const leer = !e.payload.trim();
+      entwurfZeigen(!leer);
+      if (leer) {
+        view.set(e.payload);
+        if (mode.current() === "draft") mode.standard();
+        return;
       }
-      return;
-    }
-    const jetzt = mode.current();
-    if (!leseModi.has(jetzt ?? "")) mode.to("draft");
-    view.set(e.payload);
-    onIncoming?.();
-  });
+      mode.to("draft");
+      view.set(e.payload);
+      onIncoming?.();
+    });
+  }
   await Promise.all(
     activeTabs
       .filter((tab) => tab.init)
@@ -229,5 +248,5 @@ export async function wirePanel(
       }),
   );
 
-  return { view, views, mode, draft };
+  return { view, views, mode };
 }

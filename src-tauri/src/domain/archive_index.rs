@@ -338,27 +338,18 @@ pub(crate) fn teile_fuer_index(home: &Path, relpath: &str) -> Result<Vec<Teil>, 
   }])
 }
 
-/// Slug-Vergleich eines Wikilink-Ziels gegen Name, Titel und Datei-Stem.
-fn matches(doc: &Doc, want: &str) -> bool {
-  slugify(&doc.name) == want
-    || slugify(&doc.title) == want
-    || Path::new(&doc.relpath)
-      .file_stem()
-      .is_some_and(|s| slugify(&s.to_string_lossy()) == want)
-}
-
-/// Übersichts- bzw. Schlagwort-Seite als strukturierte Wiki-Daten: Dokumente
+/// Übersichts- bzw. Schlagwort-Seite als strukturierte Archiv-Daten: Dokumente
 /// nach Ordnern gruppiert (neueste zuerst), Schlagwort-Leiste mit Zählern.
-/// Das Panel rendert daraus die Wiki-Ansicht; `kind` unterscheidet im
-/// Wiki-Puffer Seite und Dokument.
+/// Das Panel rendert daraus die Archiv-Ansicht; `kind` unterscheidet im
+/// Archiv-Puffer Seite und Dokument.
 #[derive(serde::Serialize)]
-pub(crate) struct WikiPage {
+pub(crate) struct ArchivePage {
   pub(crate) kind: &'static str,
   pub(crate) home: String,
   pub(crate) tag: Option<String>,
   pub(crate) total: usize,
   pub(crate) tags: Vec<TagCount>,
-  pub(crate) folders: Vec<WikiFolder>,
+  pub(crate) folders: Vec<ArchiveFolder>,
 }
 
 #[derive(serde::Serialize)]
@@ -368,14 +359,14 @@ pub(crate) struct TagCount {
 }
 
 #[derive(serde::Serialize)]
-pub(crate) struct WikiFolder {
+pub(crate) struct ArchiveFolder {
   /// Ordner relativ zum Archiv-Home; leer für die Wurzel.
   pub(crate) name: String,
-  pub(crate) docs: Vec<WikiDocEntry>,
+  pub(crate) docs: Vec<ArchiveDocEntry>,
 }
 
 #[derive(serde::Serialize)]
-pub(crate) struct WikiDocEntry {
+pub(crate) struct ArchiveDocEntry {
   /// Technische ID — Adressat aller Aktionen.
   pub(crate) id: String,
   /// Notiz-Typ (`md`/`html`) — Symbol im Baum, Anzeige und Editor.
@@ -395,7 +386,7 @@ pub(crate) struct WikiDocEntry {
   pub(crate) modified: String,
 }
 
-pub(crate) fn archive_page(home: &Path, tag: Option<&str>) -> Result<WikiPage, String> {
+pub(crate) fn archive_page(home: &Path, tag: Option<&str>) -> Result<ArchivePage, String> {
   let docs = scan_archive(home)?;
   let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
   for doc in &docs {
@@ -426,7 +417,7 @@ pub(crate) fn archive_page(home: &Path, tag: Option<&str>) -> Result<WikiPage, S
       .unwrap_or_default();
     folders.entry(folder).or_default().push(doc);
   }
-  Ok(WikiPage {
+  Ok(ArchivePage {
     kind: "page",
     home: home.display().to_string(),
     tag: tag.map(str::to_string),
@@ -440,7 +431,7 @@ pub(crate) fn archive_page(home: &Path, tag: Option<&str>) -> Result<WikiPage, S
       .map(|(name, mut list)| {
         // Zeitstempel-Stems sortieren chronologisch — absteigend = neueste oben.
         list.sort_by(|a, b| b.relpath.cmp(&a.relpath));
-        WikiFolder { name, docs: list.into_iter().map(doc_entry).collect() }
+        ArchiveFolder { name, docs: list.into_iter().map(doc_entry).collect() }
       })
       .collect(),
   })
@@ -507,7 +498,7 @@ pub(crate) fn folder_paths(home: &Path, dir: &Path, out: &mut Vec<String>) -> Re
   Ok(())
 }
 
-fn doc_entry(doc: &Doc) -> WikiDocEntry {
+fn doc_entry(doc: &Doc) -> ArchiveDocEntry {
   let stem = Path::new(&doc.relpath)
     .file_stem()
     .unwrap_or_default()
@@ -524,7 +515,7 @@ fn doc_entry(doc: &Doc) -> WikiDocEntry {
         .filter(|c| c.len() >= 10)
         .map(|c| c[..10].to_string())
     });
-  WikiDocEntry {
+  ArchiveDocEntry {
     id: doc.id.clone(),
     kind: doc.kind,
     relpath: doc.relpath.clone(),
@@ -550,18 +541,6 @@ pub(crate) fn resolve_id(home: &Path, id: &str) -> Result<String, String> {
     .find(|d| d.id == id)
     .map(|d| d.relpath)
     .ok_or_else(|| format!("keine Notiz mit ID {id}"))
-}
-
-/// Löst ein Wikilink-Ziel (Name, Titel oder Datei-Stem) gegen das Archiv auf
-/// und liefert den relpath des Dokuments.
-pub(crate) fn resolve_doc(home: &Path, target: &str) -> Result<String, String> {
-  let docs = scan_archive(home)?;
-  let want = slugify(target);
-  docs
-    .iter()
-    .find(|d| matches(d, &want))
-    .map(|d| d.relpath.clone())
-    .ok_or_else(|| format!("kein Archiv-Dokument zu „{target}“ gefunden"))
 }
 
 /// Alle `[[ziel]]`-Vorkommen im Text, in Dokumentreihenfolge; bei
@@ -712,18 +691,4 @@ mod tests {
     assert_eq!(page.tags.len(), 2);
   }
 
-  #[test]
-  fn resolve_ueber_name_titel_und_stem() {
-    let home = archiv();
-    // Auflösung über Titel; Name und Stem gehen über dieselben Slug-Vergleiche.
-    assert_eq!(
-      resolve_doc(&home, "Notiz Deploy").unwrap(),
-      "konzepte/2026-07-19_1005-notiz-deploy.md"
-    );
-    assert_eq!(
-      resolve_doc(&home, "2026-07-19_1000-adr-logging").unwrap(),
-      "2026-07-19_1000-adr-logging.md"
-    );
-    assert!(resolve_doc(&home, "fehlt").is_err());
-  }
 }

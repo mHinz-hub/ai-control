@@ -101,13 +101,13 @@ pub(crate) fn search_file(project: &str) -> PathBuf {
     .join(format!("{}.search.json", checked(project)))
 }
 
-/// Wiki-Puffer eines Projekts (JSON, jeweils letzte Wiki-Seite bzw. letztes
+/// Archiv-Puffer eines Projekts (JSON, jeweils letzte Archiv-Seite bzw. letztes
 /// geöffnetes Dokument — flüchtig, wird beim Session-Start geleert). Der Pfad
-/// landet als AI_CENTRAL_WIKI in der PTY-Umgebung.
-pub(crate) fn wiki_file(project: &str) -> PathBuf {
+/// landet als AI_CENTRAL_ARCHIVE in der PTY-Umgebung.
+pub(crate) fn archive_file(project: &str) -> PathBuf {
   Paths::real()
     .panels_dir()
-    .join(format!("{}.wiki.json", checked(project)))
+    .join(format!("{}.archive.json", checked(project)))
 }
 
 /// Puffer des Commit-Fensters: `show_commit` schreibt die Nachrichten-

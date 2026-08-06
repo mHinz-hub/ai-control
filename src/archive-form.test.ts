@@ -92,7 +92,7 @@ describe("initArchiveForm", () => {
 
     // Logische Sicht: Titel des Knotentexts, Pfad an der Zeile.
     const konzepte = visible()[1];
-    expect(konzepte.querySelector(".wiki-tree-name")!.textContent).toBe("Konzepte");
+    expect(konzepte.querySelector(".archive-tree-name")!.textContent).toBe("Konzepte");
     expect(konzepte.title).toBe("konzepte");
 
     // Pfeil klappt auf, ohne die Auswahl zu ändern.
@@ -139,7 +139,7 @@ describe("initArchiveForm", () => {
   it("Klick auf den Hintergrund schließt, Klick in die Box nicht", () => {
     const { form, onSubmit, root } = setup();
     form.toggle();
-    root.querySelector<HTMLElement>(".wiki-form")!.dispatchEvent(
+    root.querySelector<HTMLElement>(".archive-form")!.dispatchEvent(
       new MouseEvent("mousedown", { bubbles: true }),
     );
     expect(root.hidden).toBe(false);

@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 use crate::domain::paths::{
-  commands_file, panel_file, panel_source_file, search_file, wiki_file, Paths,
+  commands_file, panel_file, panel_source_file, search_file, archive_file, Paths,
 };
 use crate::domain::project::{
   project_config, project_pool_dir, verify_project_dir_in, ProjectConfig,
@@ -241,10 +241,12 @@ pub fn term_start(
 }
 
 /// Beobachtet eine Panel-Datei des Projekts (Entwurf oder Command-History)
-/// und schickt neuen Inhalt unter `event` an alle Fenster dieses
-/// Terminal-Prozesses (angedocktes Panel und ein evtl. abgelöstes
-/// Panel-Fenster). Pollt per mtime — kein notify-Crate, die Datei ändert sich
-/// nur, wenn geschrieben wird. Der Thread endet mit dem Prozess (Fenster zu).
+/// und schickt neuen Inhalt unter `event` an alle Fenster dieses Prozesses —
+/// das sind genau die Fenster dieses Projekts: Hauptfenster mit Dock,
+/// abgelöste Sitzung, Archiv, Commit-Dialog (jedes Projekt läuft in einem
+/// eigenen Prozess, siehe `open_terminal`). Pollt per mtime — kein
+/// notify-Crate, die Datei ändert sich nur, wenn geschrieben wird. Der Thread
+/// endet mit dem Prozess (Fenster zu).
 fn spawn_file_watcher(app: AppHandle, path: std::path::PathBuf, event: &'static str) {
   std::thread::spawn(move || {
     let mtime = || std::fs::metadata(&path).and_then(|m| m.modified()).ok();
@@ -264,8 +266,8 @@ fn spawn_file_watcher(app: AppHandle, path: std::path::PathBuf, event: &'static 
 
 /// Beobachtet den Archiv-Ordner des Projekts: ändert eine fremde Anwendung
 /// eine Datei darin — draw.io speichert ein Diagramm, ein Editor eine Notiz —,
-/// schreibt der Watcher die frische Übersicht in den Wiki-Puffer; der
-/// Puffer-Watcher meldet sie als `wiki-update` an die Fenster. Ohne ihn sähe
+/// schreibt der Watcher die frische Übersicht in den Archiv-Puffer; der
+/// Puffer-Watcher meldet sie als `archive-update` an die Fenster. Ohne ihn sähe
 /// die App nur die Änderungen, die sie selbst ausgelöst hat.
 ///
 /// Gepollt wird eine Signatur aus Pfad, mtime und Größe aller Dateien — das
@@ -288,7 +290,7 @@ fn spawn_archive_watcher(project: String) {
       if !bekannt {
         continue;
       }
-      let _ = wiki_refresh_page(&project, &home);
+      let _ = archive_refresh_page(&project, &home);
       // Nach dem Schreiben neu erfassen: ensure_ids/ensure_node_texts können
       // Dateien angefasst haben, das wäre sonst der nächste „Fremdzugriff".
       last = Some(archive_signature(&home));
@@ -577,18 +579,6 @@ pub fn panel_clear(project: String) -> Result<(), String> {
   std::fs::write(panel_file(&project), "").map_err(|e| e.to_string())
 }
 
-/// Lädt ein Archiv-Dokument in den Dokument-Puffer (Treffer-Klick in der
-/// Suche) — ohne Frontmatter-Block, wie ein frischer Entwurf — und setzt die
-/// Quell-Verknüpfung fürs Zurückschreiben. Der Watcher meldet den neuen
-/// Inhalt als `panel-update`.
-#[tauri::command]
-pub fn panel_load(project: String, path: String) -> Result<(), String> {
-  let text = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
-  let body = crate::domain::archive::strip_frontmatter(&text);
-  std::fs::write(panel_file(&project), body).map_err(|e| e.to_string())?;
-  link_panel_source(&project, std::path::Path::new(&path))
-}
-
 /// Suche aus dem Panel-Suchfeld: läuft wie das MCP-Tool search_archive und
 /// schreibt die Treffer-Datei; der Watcher zieht sie in die Ansicht (beide
 /// Fenster).
@@ -623,12 +613,13 @@ pub fn search_spots(
   crate::domain::archive_search::stellen(&conn, &id, &teil, &query)
 }
 
-/// Öffnet ein Wiki-Ziel: `tag:x` → Schlagwort-Seite, `tag:` →
-/// Archiv-Übersicht in den Wiki-Puffer (`wiki-update`); ein Dokumentname
-/// (Wikilink, Backlink) wird über den Index aufgelöst und wie ein
-/// Suchtreffer in den Dokument-Puffer geladen (`panel-update`).
+/// Öffnet ein Archiv-Ziel: `tag:x` → Schlagwort-Seite, `tag:` →
+/// Archiv-Übersicht in den Archiv-Puffer (`archive-update`). Ein Name ohne
+/// `tag:` kommt aus einem Wikilink, den die Archiv-Ansicht in ihrer Übersicht
+/// nicht gefunden hat — er meldet sich als Fehler. Früher lud der Kern ihn in
+/// den Entwurfs-Puffer; der gehört zur Sitzung und bleibt hier unberührt.
 #[tauri::command]
-pub fn wiki_open(project: String, name: String) -> Result<(), String> {
+pub fn archive_open(project: String, name: String) -> Result<(), String> {
   let home = crate::domain::archive::require_archive_home(&project)?;
   match name.strip_prefix("tag:") {
     Some(tag) => {
@@ -640,17 +631,9 @@ pub fn wiki_open(project: String, name: String) -> Result<(), String> {
         (!tag.is_empty()).then_some(tag),
       )?)
       .map_err(|e| e.to_string())?;
-      std::fs::write(wiki_file(&project), json).map_err(|e| e.to_string())
+      std::fs::write(archive_file(&project), json).map_err(|e| e.to_string())
     }
-    None => {
-      let rel = crate::domain::archive_index::resolve_doc(&home, &name)?;
-      let path = home.join(rel);
-      let text =
-        std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-      let body = crate::domain::archive::strip_frontmatter(&text);
-      std::fs::write(panel_file(&project), body).map_err(|e| e.to_string())?;
-      link_panel_source(&project, &path)
-    }
+    None => Err(format!("kein Archiv-Ziel: {name}")),
   }
 }
 
@@ -734,30 +717,30 @@ pub fn archive_set_title(project: String, id: String, title: String) -> Result<(
       relink(&project, &path, Some(&home.join(new_rel)))?;
     }
   }
-  wiki_refresh_page(&project, &home)
+  archive_refresh_page(&project, &home)
 }
 
-/// Frische Archiv-Übersicht in den Wiki-Puffer — Abschluss der
-/// Dokument-/Ordner-Operationen; der Watcher meldet `wiki-update`.
-fn wiki_refresh_page(project: &str, home: &std::path::Path) -> Result<(), String> {
+/// Frische Archiv-Übersicht in den Archiv-Puffer — Abschluss der
+/// Dokument-/Ordner-Operationen; der Watcher meldet `archive-update`.
+fn archive_refresh_page(project: &str, home: &std::path::Path) -> Result<(), String> {
   let display = crate::domain::project::display_name_in(&Paths::real(), project)?;
   crate::domain::archive_ops::ensure_node_texts(home, &display)?;
   crate::domain::archive_ops::ensure_ids(home)?;
   let json = serde_json::to_string(&crate::domain::archive_index::archive_page(home, None)?)
     .map_err(|e| e.to_string())?;
-  std::fs::write(wiki_file(project), json).map_err(|e| e.to_string())
+  std::fs::write(archive_file(project), json).map_err(|e| e.to_string())
 }
 
 
 
-/// Löscht ein Archiv-Dokument; danach zeigt das Wiki die Übersicht.
+/// Löscht ein Archiv-Dokument; danach zeigt das Archiv die Übersicht.
 #[tauri::command]
 pub fn archive_delete(project: String, id: String) -> Result<(), String> {
   let home = crate::domain::archive::require_archive_home(&project)?;
   let relpath = crate::domain::archive_index::resolve_id(&home, &id)?;
   crate::domain::archive_ops::delete_doc(&home, &relpath)?;
   relink(&project, &home.join(&relpath), None)?;
-  wiki_refresh_page(&project, &home)
+  archive_refresh_page(&project, &home)
 }
 
 
@@ -773,7 +756,7 @@ pub fn archive_delete_folder(project: String, path: String) -> Result<(), String
     }
   }
   crate::domain::archive_ops::delete_folder(&home, &path)?;
-  wiki_refresh_page(&project, &home)
+  archive_refresh_page(&project, &home)
 }
 
 /// Legt einen Ordner im Archiv an (Plus im Baum); danach Übersicht.
@@ -785,7 +768,7 @@ pub fn archive_create_folder(project: String, parent: String, name: String) -> R
   let display = crate::domain::project::display_name_in(&Paths::real(), &project)?;
   crate::domain::archive_ops::ensure_node_texts(&home, &display)?;
   crate::domain::archive_ops::ensure_ids(&home)?;
-  wiki_refresh_page(&project, &home)
+  archive_refresh_page(&project, &home)
 }
 
 /// Adresse einer Archiv-Datei: entweder eine Index-ID oder — mit dem Präfix
@@ -896,7 +879,7 @@ pub fn archive_import(
     }
     std::fs::copy(src, &target).map_err(|e| format!("{}: {e}", src.display()))?;
   }
-  wiki_refresh_page(&project, &home)
+  archive_refresh_page(&project, &home)
 }
 
 /// Leeres draw.io-Dokument: eine Seite ohne Zellen — die Desktop-App füllt es.
@@ -1048,7 +1031,7 @@ fn dir_under(home: &std::path::Path, parent: &str) -> Result<String, String> {
 /// Legt ein leeres Dokument an (Plus im Listenkopf) und öffnet es im
 /// Dokument-Tab: leerer Dokument-Puffer plus Quell-Verknüpfung — das
 /// Getippte landet über `panel_set` in der Archiv-Datei. Die Übersicht
-/// bleibt hier unangetastet; der Wiki-Tab lädt sie beim nächsten Aktivieren
+/// bleibt hier unangetastet; der Archiv-Reiter lädt sie beim nächsten Aktivieren
 /// frisch (zwei konkurrierende Puffer-Events würden sonst um den aktiven Tab
 /// rennen).
 #[tauri::command]
@@ -1065,7 +1048,7 @@ pub fn archive_create_doc(
   // Bearbeitet wird im Archiv — der Entwurfs-Puffer bleibt unberührt; die
   // frische Übersicht zeigt die neue Notiz, ihre ID öffnet dort den Editor.
   crate::domain::archive_ops::ensure_ids(&home)?;
-  wiki_refresh_page(&project, &home)?;
+  archive_refresh_page(&project, &home)?;
   note_id(&home.join(rel))
 }
 
@@ -1093,7 +1076,7 @@ pub fn archive_create_html(
   let folder = rel_new.rsplit_once('/').map(|(h, _)| h.to_string()).unwrap_or_default();
   let rel = crate::domain::archive_ops::create_html(&home, &folder, &name, &display)?;
   crate::domain::archive_ops::ensure_ids(&home)?;
-  wiki_refresh_page(&project, &home)?;
+  archive_refresh_page(&project, &home)?;
   note_id(&home.join(rel))
 }
 
@@ -1111,7 +1094,7 @@ pub fn archive_create_text(
   let rel_new = join_under(&home, &parent, &name)?;
   let folder = rel_new.rsplit_once('/').map(|(h, _)| h.to_string()).unwrap_or_default();
   let rel = crate::domain::archive_ops::create_text(&home, &folder, &name, &art)?;
-  wiki_refresh_page(&project, &home)?;
+  archive_refresh_page(&project, &home)?;
   // Die Datei steht in der Übersicht — angesprochen wird sie wie jede andere
   // Datei über ihre Index-ID, damit die Ansicht sie auswählen kann.
   Ok(format!("file:{rel}"))
@@ -1124,7 +1107,7 @@ pub fn archive_write_text(project: String, id: String, text: String) -> Result<(
   let home = crate::domain::archive::require_archive_home(&project)?;
   let relpath = rel_of(&home, &id)?;
   crate::domain::archive_ops::write_text(&home, &relpath, &text)?;
-  wiki_refresh_page(&project, &home)
+  archive_refresh_page(&project, &home)
 }
 
 /// Nebenfenster eines Projekts (Archiv, Commit): gleiche Optik, gleiche
@@ -1185,11 +1168,11 @@ pub async fn open_panel_window(
   project: String,
   mode: Option<String>,
 ) -> Result<(), String> {
-  // Zwei Flächen, zwei Fenster: das Archiv (Wiki und Suche) und die Sitzung
+  // Zwei Flächen, zwei Fenster: das Archiv (Archiv und Suche) und die Sitzung
   // (Entwurf, Befehle, Aufgaben). Beide dürfen nebeneinander stehen — wer im
   // Archiv liest, will die Befehlsliste nicht dafür schließen.
   let flaeche = match mode.as_deref() {
-    Some("wiki") | Some("search") => "archiv",
+    Some("archive") | Some("search") => "archiv",
     _ => "sitzung",
   };
   let label = format!("panel-{flaeche}-{project}");

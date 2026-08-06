@@ -82,7 +82,7 @@ export function linkWikiRefs(root: HTMLElement, onClick: (name: string) => void)
         const label = sep < 0 ? part : part.slice(sep + 1);
         const a = document.createElement("a");
         a.href = "#";
-        a.className = "wiki";
+        a.className = "wiki"; // Wikilink im Text — bleibt beim Begriff
         a.textContent = label;
         a.addEventListener("click", (e) => {
           e.preventDefault();

@@ -34,7 +34,6 @@ describe("Nachrichtentabellen", () => {
       "Pools",
       "Name",
       "Theme",
-      "Wiki",
       "ToDo",
       // Kurzform des ToDo-Tabs — in beiden Sprachen derselbe Buchstabe.
       "T",
@@ -103,7 +102,7 @@ describe("t()", () => {
 describe("applyI18n()", () => {
   it("beschriftet Text und Attribute", () => {
     document.body.innerHTML = `
-      <button data-i18n="panel.tabWiki" data-i18n-title="panel.tabWikiTitle">alt</button>
+      <button data-i18n="panel.tabArchive" data-i18n-title="panel.tabArchiveTitle">alt</button>
       <button data-i18n-aria="panel.close"></button>
       <input data-i18n-placeholder="search.placeholder" />`;
     applyI18n();

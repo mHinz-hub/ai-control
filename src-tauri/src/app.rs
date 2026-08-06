@@ -336,8 +336,7 @@ fn invoke_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send +
     terminal::panel_set,
     terminal::panel_clear,
     terminal::search_run,
-    terminal::panel_load,
-    terminal::wiki_open,
+    terminal::archive_open,
     terminal::archive_read,
     terminal::archive_image,
     terminal::open_image_window,
@@ -399,25 +398,27 @@ pub(crate) fn terminal_builder(project: String) -> tauri::Builder<tauri::Wry> {
       terminal::build_window(app.handle(), &project, &cfg)?;
       Ok(())
     })
-    // Fenster zu → PTY-Session abräumen; danach endet der Prozess. Das
-    // abgelöste Panel-Fenster hat keine PTY: sein Schließen dockt das Panel
-    // wieder an (panel-attached), der Prozess läuft weiter.
+    // Fenster zu → PTY-Session abräumen; danach endet der Prozess. Ein
+    // abgelöstes Panel-Fenster hat keine PTY: es geht für sich, das Dock im
+    // Hauptfenster bleibt davon unberührt.
     .on_window_event(|window, event| {
       if let tauri::WindowEvent::Destroyed = event {
-        if window.label().starts_with("panel-") {
-          use tauri::{Emitter, Manager};
-          let _ = window.app_handle().emit("panel-window-closed", ());
-        } else {
-          // Hauptfenster des Projekts zu: das Archiv-Fenster geht mit —
-          // sonst hielte es den Terminal-Prozess allein am Leben.
-          use tauri::Manager;
-          for (label, w) in window.app_handle().webview_windows() {
-            if label.starts_with("panel-") {
-              let _ = w.close();
-            }
+        // Aufräumen tut nur das Hauptfenster: seine beiden Panel-Fenster
+        // gehen mit — sonst hielten sie den Prozess allein am Leben —, danach
+        // die PTY-Session. Bild- und Commit-Fenster gehen für sich.
+        use tauri::Manager;
+        let Some(project) = window.label().strip_prefix("term-") else {
+          return;
+        };
+        for flaeche in ["sitzung", "archiv"] {
+          if let Some(w) = window
+            .app_handle()
+            .get_webview_window(&format!("panel-{flaeche}-{project}"))
+          {
+            let _ = w.close();
           }
-          terminal::close(window);
         }
+        terminal::close(window);
       }
     })
     .invoke_handler(invoke_handlers())

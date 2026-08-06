@@ -16,7 +16,7 @@ function modeSetup() {
     <div id="tabs">
       <button data-mode="commands">Befehle</button>
       <button data-mode="draft">Dokument</button>
-      <button data-mode="wiki">Wiki</button>
+      <button data-mode="archive">Archiv</button>
       <button data-mode="search">Suche</button>
     </div>
     <div id="title">Mein Titel</div>
@@ -30,10 +30,28 @@ function modeSetup() {
   const flush = vi.fn();
   const mode = initPanelMode({
     tabs: [
-      { mode: "commands", btn: tab("commands"), content: el("cc"), label: "Befehle" },
-      { mode: "draft", btn: tab("draft"), content: null, label: "Dokument" },
-      { mode: "wiki", btn: tab("wiki"), content: el("wc"), label: "Wiki" },
-      { mode: "search", btn: tab("search"), content: el("sc"), label: "Suche" },
+      {
+        mode: "commands",
+        btn: tab("commands"),
+        content: el("cc"),
+        label: "Befehle",
+        titel: "Befehls-History",
+      },
+      {
+        mode: "draft",
+        btn: tab("draft"),
+        content: null,
+        label: "Dokument",
+        titel: "Entwurf",
+      },
+      { mode: "archive", btn: tab("archive"), content: el("wc"), label: "Archiv", titel: "Archiv-Notizen" },
+      {
+        mode: "search",
+        btn: tab("search"),
+        content: el("sc"),
+        label: "Suche",
+        titel: "Archiv-Suche",
+      },
     ],
     draftEls: [el("draft-el")],
     titleEl: el("title"),
@@ -43,15 +61,27 @@ function modeSetup() {
 }
 
 describe("initPanelMode", () => {
-  it("startet im Dokument-Modus mit aktivem Tab", () => {
-    const { el, tab } = modeSetup();
-    expect(el("draft-el").hidden).toBe(false);
+  /// Womit eine Fläche startet, entscheidet ihr Aufrufer — der Umschalter
+  /// selbst beginnt ohne Auswahl, alle Ansichten aus.
+  it("startet ohne Auswahl", () => {
+    const { mode, el } = modeSetup();
+    expect(mode.current()).toBe(null);
+    expect(el("draft-el").hidden).toBe(true);
     expect(el("cc").hidden).toBe(true);
-    expect(tab("draft").classList.contains("active")).toBe(true);
+    expect(document.querySelectorAll(".active").length).toBe(0);
+  });
+
+  /// Der Hover benennt die Ansicht — auch beim abgekürzten Tab.
+  it("trägt den erklärenden Titel als Hover", () => {
+    const { tab } = modeSetup();
+    expect(tab("commands").title).toBe("Befehls-History");
+    expect(tab("archive").title).toBe("Archiv-Notizen");
   });
 
   it("wechselt Sichtbarkeit, Titel und aktive Markierung", () => {
     const { mode, flush, el, tab } = modeSetup();
+    mode.to("draft");
+    flush.mockClear();
     mode.to("commands");
     expect(flush).toHaveBeenCalledOnce();
     expect(el("cc").hidden).toBe(false);
@@ -65,13 +95,14 @@ describe("initPanelMode", () => {
 
   it("Tab-Klick wechselt den Modus", () => {
     const { el, tab } = modeSetup();
-    tab("wiki").click();
+    tab("archive").click();
     expect(el("wc").hidden).toBe(false);
     expect(el("draft-el").hidden).toBe(true);
   });
 
   it("clear hebt die Auswahl auf; danach wählt to() wieder aus", () => {
     const { mode, el, tab } = modeSetup();
+    mode.to("draft");
     mode.clear();
     expect(document.querySelectorAll(".active").length).toBe(0);
     expect(mode.current()).toBe(null);
